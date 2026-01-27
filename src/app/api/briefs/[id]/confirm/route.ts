@@ -55,68 +55,52 @@ export async function POST(
     });
 
     // Create video record
-    const isLongVideo = brief.videoLength && brief.videoLength >= 45;
+    // Note: For now, only support SHORT videos until database migration is complete
     const video = await prisma.video.create({
       data: {
         userId: session.user.id,
         briefId: id,
         conversationId: brief.conversationId,
         prompt: videoPrompt,
-        model: isLongVideo ? "veo-3.1" : (brief.logoUrl ? "gen4_turbo" : "gen4_turbo"),
+        model: brief.logoUrl ? "gen4_turbo" : "gen4_turbo",
         duration: brief.videoLength || 5,
         ratio: "1280:720",
         status: "PENDING",
-        videoType: isLongVideo ? "LONG" : "SHORT",
       },
     });
 
-    // Handle short vs long videos differently
-    if (isLongVideo) {
-      // For long videos, just mark as ready - frontend will trigger generation
-      await prisma.conversation.update({
-        where: { id: brief.conversationId },
-        data: { status: "BRIEF_READY" },
-      });
+    // For now, all videos are processed as short videos with Runway ML
+    // Long video support will be added once database migration is complete
+    await prisma.conversation.update({
+      where: { id: brief.conversationId },
+      data: { status: "GENERATING" },
+    });
 
-      return NextResponse.json({
-        videoId: video.id,
-        videoType: "LONG",
-        message: "הבריף אושר - מוכן ליצירת סרטון ארוך",
-      });
+    // Submit to Runway ML
+    let taskId: string;
+    if (brief.logoUrl) {
+      taskId = await createVideoFromImage(
+        videoPrompt,
+        brief.logoUrl,
+        brief.videoLength || 5
+      );
     } else {
-      // For short videos, proceed with Runway ML generation
-      await prisma.conversation.update({
-        where: { id: brief.conversationId },
-        data: { status: "GENERATING" },
-      });
-
-      // Submit to Runway ML
-      let taskId: string;
-      if (brief.logoUrl) {
-        taskId = await createVideoFromImage(
-          videoPrompt,
-          brief.logoUrl,
-          brief.videoLength || 5
-        );
-      } else {
-        taskId = await createVideoFromText(
-          videoPrompt,
-          brief.videoLength || 5
-        );
-      }
-
-      // Update video with Runway task ID
-      await prisma.video.update({
-        where: { id: video.id },
-        data: { runwayTaskId: taskId, status: "PROCESSING" },
-      });
-
-      return NextResponse.json({
-        videoId: video.id,
-        videoType: "SHORT",
-        message: "יצירת הסרטון החלה",
-      });
+      taskId = await createVideoFromText(
+        videoPrompt,
+        brief.videoLength || 5
+      );
     }
+
+    // Update video with Runway task ID
+    await prisma.video.update({
+      where: { id: video.id },
+      data: { runwayTaskId: taskId, status: "PROCESSING" },
+    });
+
+    return NextResponse.json({
+      videoId: video.id,
+      message: "יצירת הסרטון החלה",
+    });
   } catch (error) {
     console.error("Video generation error:", error);
 

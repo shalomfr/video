@@ -60,7 +60,7 @@ git push -u origin main
    - **Runtime**: `Node`
    - **Build Command**: 
      ```
-     npm install && npx prisma generate && npx prisma migrate deploy && npm run build
+     npm install && npx prisma generate && npx prisma db push && npm run build
      ```
    - **Start Command**: 
      ```
