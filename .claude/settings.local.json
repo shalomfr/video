@@ -23,7 +23,11 @@
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
       "Bash(git push:*)",
-      "mcp__puppeteer__puppeteer_screenshot"
+      "mcp__puppeteer__puppeteer_screenshot",
+      "WebSearch",
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(git reset:*)"
     ]
   }
 }
