@@ -1,15 +1,26 @@
 import RunwayML from "@runwayml/sdk";
 
-const runway = new RunwayML({
-  apiKey: process.env.RUNWAYML_API_SECRET!,
-});
+// Lazy initialization - only create if API key exists
+let runway: RunwayML | null = null;
+
+function getRunway() {
+  if (!runway && process.env.RUNWAYML_API_SECRET) {
+    runway = new RunwayML({
+      apiKey: process.env.RUNWAYML_API_SECRET,
+    });
+  }
+  if (!runway) {
+    throw new Error("RUNWAYML_API_SECRET is not configured");
+  }
+  return runway;
+}
 
 export async function createVideoFromImage(
   promptText: string,
   imageUrl: string,
   duration: number = 5
 ) {
-  const task = await runway.imageToVideo.create({
+  const task = await getRunway().imageToVideo.create({
     model: "gen4_turbo",
     promptImage: imageUrl,
     promptText,
@@ -27,7 +38,7 @@ export async function createVideoFromText(
   // Map 5->6 and 10->8
   const veoFourDuration = duration <= 5 ? 6 : 8;
 
-  const task = await runway.textToVideo.create({
+  const task = await getRunway().textToVideo.create({
     model: "veo3.1",
     promptText,
     duration: veoFourDuration as 4 | 6 | 8,
@@ -37,7 +48,7 @@ export async function createVideoFromText(
 }
 
 export async function getTaskStatus(taskId: string) {
-  const task = await runway.tasks.retrieve(taskId);
+  const task = await getRunway().tasks.retrieve(taskId);
   return {
     status: task.status,
     output: "output" in task ? task.output : undefined,

@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -162,7 +162,7 @@ model Video {
   runwayTaskId   String?     @unique
   status         VideoStatus @default(PENDING)
 
-  prompt         String?    
+  prompt         String?
   model          String?
   duration       Int?
   ratio          String?
@@ -170,7 +170,12 @@ model Video {
   videoUrl       String?
   thumbnailUrl   String?
 
-  errorMessage   String?    
+  errorMessage   String?
+
+  // For long videos with multiple scenes
+  totalScenes     Int?        // Total number of scenes (for long videos)
+  completedScenes Int?        // How many scenes are completed
+  scenes          Scene[]     // Relation to individual scenes
 
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -183,4 +188,25 @@ model Video {
   @@index([userId])
   @@index([runwayTaskId])
   @@map("videos")
+}
+
+// Scene model for multi-scene videos (long videos)
+model Scene {
+  id              String      @id @default(cuid())
+  videoId         String
+  sceneNumber     Int         // 1, 2, 3...
+  prompt          String      // Specific prompt for this scene
+  runwayTaskId    String?
+  status          VideoStatus @default(PENDING)
+  videoUrl        String?
+  duration        Int         // Usually 8 seconds
+  errorMessage    String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, sceneNumber])
+  @@index([videoId])
+  @@map("scenes")
 }
