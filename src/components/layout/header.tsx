@@ -61,7 +61,10 @@ export function Header({ onMenuClick }: HeaderProps) {
               </p>
             </div>
             <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={async () => {
+                await signOut({ redirect: false });
+                window.location.href = "/login";
+              }}
               className="w-full flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-muted transition-colors"
             >
               <LogOut className="w-4 h-4" />
