@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "WebFetch(domain:docs.dev.runwayml.com)",
+      "Bash(npx create-next-app:*)",
+      "Bash(xcopy:*)",
+      "Bash(npm install:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npm ls:*)",
+      "Bash(find:*)",
+      "Bash(npx shadcn@latest init:*)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(node -e:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout 8 bash -c 'while [ ! -s \"\"C:\\\\Users\\\\shalom\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--cursor-project-video\\\\tasks\\\\bba4dea.output\"\" ]; do sleep 0.5; done; cat \"\"C:\\\\Users\\\\shalom\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--cursor-project-video\\\\tasks\\\\bba4dea.output\"\"')",
+      "Bash(taskkill:*)",
+      "Bash(psql:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
