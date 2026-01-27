@@ -34,12 +34,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -99,7 +99,7 @@ model Message {
   id             String      @id @default(cuid())
   conversationId String
   role           MessageRole
-  content        String      @db.Text
+  content        String     
   metadata       Json?
   createdAt      DateTime    @default(now())
 
@@ -123,16 +123,16 @@ model Brief {
   videoType      String?
   businessName   String?
   industry       String?
-  businessDesc   String? @db.Text
+  businessDesc   String?
   logoUrl        String?
   brandColors    Json?
   style          String?
-  targetAudience String? @db.Text
+  targetAudience String?
   videoLength    Int?
   mood           String?
-  additionalNotes String? @db.Text
+  additionalNotes String?
 
-  generatedPrompt String? @db.Text
+  generatedPrompt String?
 
   isConfirmed  Boolean  @default(false)
   createdAt    DateTime @default(now())
@@ -162,7 +162,7 @@ model Video {
   runwayTaskId   String?     @unique
   status         VideoStatus @default(PENDING)
 
-  prompt         String?     @db.Text
+  prompt         String?    
   model          String?
   duration       Int?
   ratio          String?
@@ -170,7 +170,7 @@ model Video {
   videoUrl       String?
   thumbnailUrl   String?
 
-  errorMessage   String?     @db.Text
+  errorMessage   String?    
 
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
