@@ -42,9 +42,13 @@ export async function POST(request: Request) {
       { message: "ההרשמה בוצעה בהצלחה", userId: user.id },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
+    console.error("Registration error:", error);
     return NextResponse.json(
-      { error: "שגיאה בהרשמה, נסה שוב" },
+      {
+        error: "שגיאה בהרשמה, נסה שוב",
+        details: process.env.NODE_ENV === "development" ? String(error) : undefined,
+      },
       { status: 500 }
     );
   }
