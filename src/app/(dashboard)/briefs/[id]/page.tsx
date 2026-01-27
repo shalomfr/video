@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowRight, Loader2, Play, Film } from "lucide-react";
+import { ArrowRight, Loader2, Play, Film, Video } from "lucide-react";
+
+interface VideoInfo {
+  id: string;
+  status: string;
+}
 
 interface BriefDetail {
   id: string;
@@ -21,6 +26,7 @@ interface BriefDetail {
   generatedPrompt: string | null;
   isConfirmed: boolean;
   createdAt: string;
+  videos?: VideoInfo[];
 }
 
 export default function BriefDetailPage() {
@@ -42,56 +48,37 @@ export default function BriefDetailPage() {
     load();
   }, [params.id]);
 
-  const handleCreateLongVideo = async () => {
+  const handleCreateVideo = async () => {
     if (!brief?.id) return;
 
     setGenerating(true);
     try {
-      // First confirm the brief if not already confirmed
-      if (!brief.isConfirmed) {
-        const confirmRes = await fetch(`/api/briefs/${brief.id}/confirm`, {
-          method: "POST",
-        });
-        if (!confirmRes.ok) throw new Error("Failed to confirm brief");
+      const confirmRes = await fetch(`/api/briefs/${brief.id}/confirm`, {
+        method: "POST",
+      });
+      
+      if (!confirmRes.ok) {
+        const errorData = await confirmRes.json();
+        throw new Error(errorData.error || "Failed to create video");
       }
-
-      // Find the video that was created
-      const briefRes = await fetch(`/api/briefs/${brief.id}`);
-      if (!briefRes.ok) throw new Error("Failed to get brief");
-      const updatedBrief = await briefRes.json();
-
-      // Find the long video
-      const videosRes = await fetch("/api/videos");
-      if (!videosRes.ok) throw new Error("Failed to get videos");
-      const videos = await videosRes.json();
-
-      const longVideo = videos.find((v: any) =>
-        v.briefId === brief.id && v.videoType === "LONG"
-      );
-
-      if (longVideo) {
-        // Start the long video generation
-        const generateRes = await fetch(`/api/videos/${longVideo.id}/generate-long`, {
-          method: "POST",
-        });
-
-        if (generateRes.ok) {
-          router.push(`/videos/${longVideo.id}`);
-        } else {
-          throw new Error("Failed to start video generation");
-        }
+      
+      const result = await confirmRes.json();
+      
+      if (result.videoId) {
+        router.push(`/videos/${result.videoId}`);
       } else {
-        throw new Error("Long video not found");
+        throw new Error("Video ID not returned");
       }
     } catch (error) {
-      console.error("Failed to create long video:", error);
-      alert("שגיאה ביצירת סרטון ארוך");
+      console.error("Failed to create video:", error);
+      alert(error instanceof Error ? error.message : "שגיאה ביצירת סרטון");
     } finally {
       setGenerating(false);
     }
   };
 
-  const isLongVideo = brief && brief.isConfirmed && brief.videoLength && brief.videoLength >= 45;
+  const hasExistingVideo = brief?.videos && brief.videos.length > 0;
+  const latestVideo = hasExistingVideo ? brief.videos[0] : null;
 
   if (loading) {
     return (
@@ -190,31 +177,55 @@ export default function BriefDetailPage() {
         )}
       </div>
 
-      {/* Create Long Video Button */}
-      {isLongVideo && (
-        <div className="mt-6">
-          <button
-            onClick={handleCreateLongVideo}
-            disabled={generating}
-            className="w-full bg-primary text-primary-foreground rounded-xl p-4 font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                יוצר סרטון ארוך...
-              </>
-            ) : (
-              <>
-                <Film className="w-5 h-5" />
-                צור סרטון ארוך
-              </>
-            )}
-          </button>
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            יצירת סרטון ארוך עלולה לקחת 10-20 דקות ועלותו כ-$45
+      {/* Create Video Button */}
+      <div className="mt-6 space-y-4">
+        {/* Show existing video if any */}
+        {hasExistingVideo && latestVideo && (
+          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                <Video className="w-5 h-5" />
+                <span className="font-medium">
+                  סרטון קיים - {latestVideo.status === "COMPLETED" ? "מוכן" : 
+                              latestVideo.status === "PROCESSING" ? "בתהליך יצירה" :
+                              latestVideo.status === "FAILED" ? "נכשל" : "ממתין"}
+                </span>
+              </div>
+              <Link
+                href={`/videos/${latestVideo.id}`}
+                className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                צפה בסרטון
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Create new video button */}
+        <button
+          onClick={handleCreateVideo}
+          disabled={generating}
+          className="w-full bg-primary text-primary-foreground rounded-xl p-4 font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {generating ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              יוצר סרטון...
+            </>
+          ) : (
+            <>
+              <Play className="w-5 h-5" />
+              {hasExistingVideo ? "צור סרטון חדש" : "צור סרטון"}
+            </>
+          )}
+        </button>
+        
+        {brief.videoLength && (
+          <p className="text-xs text-muted-foreground text-center">
+            אורך הסרטון: {brief.videoLength} שניות
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Confirmation status */}
       {brief.isConfirmed && (
