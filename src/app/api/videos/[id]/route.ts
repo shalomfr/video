@@ -18,6 +18,9 @@ export async function GET(
     include: {
       brief: true,
       conversation: { select: { title: true } },
+      scenes: {
+        orderBy: { sceneNumber: 'asc' },
+      },
     },
   });
 

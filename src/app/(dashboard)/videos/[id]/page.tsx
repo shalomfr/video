@@ -4,16 +4,30 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { VideoPlayer } from "@/components/video/video-player";
 import { GenerationProgress } from "@/components/video/generation-progress";
+import { SceneTimeline } from "@/components/video/scene-timeline";
+import { LongVideoProgress } from "@/components/video/long-video-progress";
 import { Loader2, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 interface VideoDetail {
   id: string;
   status: string;
+  videoType: string;
+  pipelineStage: string | null;
   videoUrl: string | null;
   prompt: string | null;
   model: string | null;
   duration: number | null;
+  totalScenes: number | null;
+  completedScenes: number | null;
+  scenes: Array<{
+    id: string;
+    sceneNumber: number;
+    status: string;
+    qualityScore?: number;
+    retryCount: number;
+    errorMessage?: string;
+  }>;
   createdAt: string;
   completedAt: string | null;
   brief: {
@@ -29,12 +43,25 @@ export default function VideoDetailPage() {
   const params = useParams();
   const [video, setVideo] = useState<VideoDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scenes, setScenes] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
         const res = await fetch(`/api/videos/${params.id}`);
-        if (res.ok) setVideo(await res.json());
+        if (res.ok) {
+          const videoData = await res.json();
+          setVideo(videoData);
+
+          // Load scenes for long videos
+          if (videoData.videoType === 'LONG') {
+            const scenesRes = await fetch(`/api/videos/${params.id}/scenes`);
+            if (scenesRes.ok) {
+              const scenesData = await scenesRes.json();
+              setScenes(scenesData.scenes || []);
+            }
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -61,6 +88,9 @@ export default function VideoDetailPage() {
   const isGenerating =
     video.status === "PENDING" || video.status === "PROCESSING";
 
+  const isLongVideo = video.videoType === 'LONG';
+  const isLongVideoGenerating = isLongVideo && isGenerating;
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <Link
@@ -75,7 +105,15 @@ export default function VideoDetailPage() {
         {video.brief?.businessName || "סרטון"}
       </h1>
 
-      {isGenerating ? (
+      {isLongVideoGenerating ? (
+        <LongVideoProgress
+          videoId={video.id}
+          onComplete={() => {
+            // Reload video data when complete
+            window.location.reload();
+          }}
+        />
+      ) : isGenerating ? (
         <GenerationProgress
           videoId={video.id}
           onComplete={(videoUrl) => {
@@ -87,7 +125,7 @@ export default function VideoDetailPage() {
       ) : video.status === "COMPLETED" && video.videoUrl ? (
         <VideoPlayer
           videoUrl={video.videoUrl}
-          title={video.brief?.businessName || undefined}
+          title={video.brief?.businessName as any}
         />
       ) : (
         <div className="bg-red-50 dark:bg-red-950/30 rounded-2xl p-8 text-center">
@@ -95,6 +133,31 @@ export default function VideoDetailPage() {
           <p className="text-sm text-muted-foreground mt-1">
             ניתן לנסות שוב מהבריף
           </p>
+        </div>
+      )}
+
+      {/* Scene Timeline for Long Videos */}
+      {isLongVideo && scenes.length > 0 && (
+        <div className="mt-8">
+          <SceneTimeline
+            scenes={scenes}
+            pipelineStage={video.pipelineStage}
+            onRegenerateScene={async (sceneId) => {
+              try {
+                await fetch(`/api/videos/${video.id}/scenes/${sceneId}/regenerate`, {
+                  method: 'POST',
+                });
+                // Reload scenes
+                const scenesRes = await fetch(`/api/videos/${video.id}/scenes`);
+                if (scenesRes.ok) {
+                  const scenesData = await scenesRes.json();
+                  setScenes(scenesData.scenes || []);
+                }
+              } catch (error) {
+                console.error('Failed to regenerate scene:', error);
+              }
+            }}
+          />
         </div>
       )}
 
@@ -133,10 +196,22 @@ export default function VideoDetailPage() {
                 <p className="font-medium">{video.brief.mood}</p>
               </div>
             )}
+            <div>
+              <span className="text-muted-foreground">סוג סרטון:</span>
+              <p className="font-medium">
+                {video.videoType === 'LONG' ? 'ארוך' : 'קצר'}
+              </p>
+            </div>
             {video.duration && (
               <div>
                 <span className="text-muted-foreground">אורך:</span>
                 <p className="font-medium">{video.duration} שניות</p>
+              </div>
+            )}
+            {video.totalScenes && (
+              <div>
+                <span className="text-muted-foreground">מספר סצנות:</span>
+                <p className="font-medium">{video.totalScenes}</p>
               </div>
             )}
           </div>

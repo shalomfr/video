@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, Play, Film } from "lucide-react";
 
 interface BriefDetail {
   id: string;
@@ -25,8 +25,10 @@ interface BriefDetail {
 
 export default function BriefDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const [brief, setBrief] = useState<BriefDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -39,6 +41,57 @@ export default function BriefDetailPage() {
     }
     load();
   }, [params.id]);
+
+  const handleCreateLongVideo = async () => {
+    if (!brief?.id) return;
+
+    setGenerating(true);
+    try {
+      // First confirm the brief if not already confirmed
+      if (!brief.isConfirmed) {
+        const confirmRes = await fetch(`/api/briefs/${brief.id}/confirm`, {
+          method: "POST",
+        });
+        if (!confirmRes.ok) throw new Error("Failed to confirm brief");
+      }
+
+      // Find the video that was created
+      const briefRes = await fetch(`/api/briefs/${brief.id}`);
+      if (!briefRes.ok) throw new Error("Failed to get brief");
+      const updatedBrief = await briefRes.json();
+
+      // Find the long video
+      const videosRes = await fetch("/api/videos");
+      if (!videosRes.ok) throw new Error("Failed to get videos");
+      const videos = await videosRes.json();
+
+      const longVideo = videos.find((v: any) =>
+        v.briefId === brief.id && v.videoType === "LONG"
+      );
+
+      if (longVideo) {
+        // Start the long video generation
+        const generateRes = await fetch(`/api/videos/${longVideo.id}/generate-long`, {
+          method: "POST",
+        });
+
+        if (generateRes.ok) {
+          router.push(`/videos/${longVideo.id}`);
+        } else {
+          throw new Error("Failed to start video generation");
+        }
+      } else {
+        throw new Error("Long video not found");
+      }
+    } catch (error) {
+      console.error("Failed to create long video:", error);
+      alert("שגיאה ביצירת סרטון ארוך");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const isLongVideo = brief && brief.isConfirmed && brief.videoLength && brief.videoLength >= 45;
 
   if (loading) {
     return (
@@ -136,6 +189,42 @@ export default function BriefDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Create Long Video Button */}
+      {isLongVideo && (
+        <div className="mt-6">
+          <button
+            onClick={handleCreateLongVideo}
+            disabled={generating}
+            className="w-full bg-primary text-primary-foreground rounded-xl p-4 font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                יוצר סרטון ארוך...
+              </>
+            ) : (
+              <>
+                <Film className="w-5 h-5" />
+                צור סרטון ארוך
+              </>
+            )}
+          </button>
+          <p className="text-xs text-muted-foreground text-center mt-2">
+            יצירת סרטון ארוך עלולה לקחת 10-20 דקות ועלותו כ-$45
+          </p>
+        </div>
+      )}
+
+      {/* Confirmation status */}
+      {brief.isConfirmed && (
+        <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+          <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+            <ArrowRight className="w-4 h-4" />
+            <span className="text-sm font-medium">הבריף אושר</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -153,6 +153,11 @@ enum VideoStatus {
   FAILED
 }
 
+enum VideoType {
+  SHORT
+  LONG
+}
+
 model Video {
   id             String      @id @default(cuid())
   conversationId String?     @unique
@@ -173,6 +178,9 @@ model Video {
   errorMessage   String?
 
   // For long videos with multiple scenes
+  videoType       VideoType   @default(SHORT) // SHORT | LONG
+  pipelineStage   String?     // PLANNING | GENERATING | QA | JOINING | DONE
+  scriptData      Json?       // Full script from Gemini
   totalScenes     Int?        // Total number of scenes (for long videos)
   completedScenes Int?        // How many scenes are completed
   scenes          Scene[]     // Relation to individual scenes
@@ -201,6 +209,13 @@ model Scene {
   videoUrl        String?
   duration        Int         // Usually 8 seconds
   errorMessage    String?
+
+  // Additional fields for long video pipeline
+  sceneDescription String?    // Description from script
+  qualityScore     Float?     // Score from Gemini analysis
+  retryCount       Int        @default(0) // How many times regenerated
+  referenceImages  Json?      // Reference images for scene
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 

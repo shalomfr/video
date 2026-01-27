@@ -4,7 +4,7 @@ import { Download } from "lucide-react";
 
 interface VideoPlayerProps {
   videoUrl: string;
-  title?: string;
+  title?: string | null | undefined;
 }
 
 export function VideoPlayer({ videoUrl, title }: VideoPlayerProps) {

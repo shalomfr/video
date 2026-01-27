@@ -7,6 +7,7 @@ import { ChatInput } from "./chat-input";
 import { LogoUpload } from "./logo-upload";
 import { ColorPicker } from "./color-picker";
 import { BriefSummary } from "./brief-summary";
+import { VideoLengthSelector } from "./video-length-selector";
 import { useChat } from "@/hooks/use-chat";
 
 export function ChatContainer() {
@@ -14,6 +15,7 @@ export function ChatContainer() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [showLogoUpload, setShowLogoUpload] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showVideoLengthSelector, setShowVideoLengthSelector] = useState(false);
   const [showBriefSummary, setShowBriefSummary] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
@@ -58,6 +60,9 @@ export function ChatContainer() {
     if (lastTrigger === "COLOR_PICKER") {
       setShowColorPicker(true);
     }
+    if (lastTrigger === "VIDEO_LENGTH_SELECTOR") {
+      setShowVideoLengthSelector(true);
+    }
     if (lastTrigger === "BRIEF_CONFIRMED") {
       setShowBriefSummary(true);
     }
@@ -91,6 +96,20 @@ export function ChatContainer() {
     sendMessage("אין לי צבעי מותג מוגדרים, בחר צבעים מתאימים");
   }, [sendMessage]);
 
+  const handleVideoLengthSelected = useCallback(
+    (length: "short" | "long") => {
+      setShowVideoLengthSelector(false);
+      const lengthText = length === "short" ? "קצר (5-10 שניות)" : "ארוך (45-144 שניות)";
+      sendMessage(`אני רוצה סרטון ${lengthText}`);
+    },
+    [sendMessage]
+  );
+
+  const handleVideoLengthSkip = useCallback(() => {
+    setShowVideoLengthSelector(false);
+    sendMessage("אני רוצה סרטון קצר");
+  }, [sendMessage]);
+
   const handleVideoConfirmed = useCallback(
     (videoId: string) => {
       router.push(`/videos/${videoId}`);
@@ -115,6 +134,13 @@ export function ChatContainer() {
           />
         )}
 
+        {showVideoLengthSelector && (
+          <VideoLengthSelector
+            onSelect={handleVideoLengthSelected}
+            onSkip={handleVideoLengthSkip}
+          />
+        )}
+
         {showBriefSummary && conversationId && (
           <BriefSummary
             conversationId={conversationId}
@@ -134,7 +160,8 @@ export function ChatContainer() {
         disabled={
           isLoading ||
           !conversationId ||
-          showBriefSummary
+          showBriefSummary ||
+          showVideoLengthSelector
         }
       />
     </div>
