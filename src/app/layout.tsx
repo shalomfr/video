@@ -21,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="he" dir="rtl">
-      <body className={`${heebo.variable} font-sans antialiased`}>
+    <html lang="he" dir="rtl" suppressHydrationWarning>
+      <body className={`${heebo.variable} font-sans antialiased`} suppressHydrationWarning>
         <AuthProvider>
           {children}
           <Toaster position="top-center" dir="rtl" />
