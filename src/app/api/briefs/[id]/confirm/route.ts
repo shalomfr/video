@@ -49,6 +49,11 @@ export async function POST(
       data: { generatedPrompt: videoPrompt },
     });
 
+    // Delete existing video if exists (to handle re-confirmation)
+    await prisma.video.deleteMany({
+      where: { conversationId: brief.conversationId },
+    });
+
     // Create video record
     const video = await prisma.video.create({
       data: {

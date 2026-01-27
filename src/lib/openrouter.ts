@@ -9,7 +9,7 @@ const openrouter = new OpenAI({
   },
 });
 
-const MODEL = "anthropic/claude-sonnet-4";
+const MODEL = "anthropic/claude-3.5-sonnet";
 
 export async function streamChatResponse(
   messages: { role: "system" | "user" | "assistant"; content: string }[]
