@@ -24,6 +24,11 @@
 .DS_Store
 *.pem
 
+# user uploads (but keep directory structure)
+/public/uploads/**/*
+!/public/uploads/logos/
+!/public/uploads/logos/.gitkeep
+
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -31,6 +36,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
+.env
 .env*.local
 .env.local
 .env.development.local
@@ -43,3 +49,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# sqlite database
+*.db
+*.db-journal
+
+# claude settings
+.claude/

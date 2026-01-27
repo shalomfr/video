@@ -37,24 +37,25 @@ export function LogoUpload({ onUpload, onSkip }: LogoUploadProps) {
       setPreview(objectUrl);
 
       try {
-        // Upload using FormData to our uploadthing endpoint
+        // Upload using FormData to our logo upload endpoint
         const formData = new FormData();
         formData.append("file", file);
 
-        const res = await fetch("/api/uploadthing", {
+        const res = await fetch("/api/upload/logo", {
           method: "POST",
           body: formData,
         });
 
         if (!res.ok) {
-          throw new Error("Upload failed");
+          const errorData = await res.json();
+          throw new Error(errorData.error || "Upload failed");
         }
 
         const data = await res.json();
-        onUpload(data.url || objectUrl);
-      } catch {
-        // Fallback: use object URL (for development without UploadThing)
-        onUpload(objectUrl);
+        onUpload(data.url);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "שגיאה בהעלאת הקובץ");
+        setPreview(null);
       } finally {
         setUploading(false);
       }
