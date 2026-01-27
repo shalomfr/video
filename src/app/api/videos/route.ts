@@ -8,15 +8,23 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const videos = await prisma.video.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "desc" },
-    include: {
-      brief: {
-        select: { businessName: true, videoType: true },
+  try {
+    const videos = await prisma.video.findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: "desc" },
+      include: {
+        brief: {
+          select: { businessName: true, videoType: true },
+        },
       },
-    },
-  });
+    });
 
-  return NextResponse.json(videos);
+    return NextResponse.json(videos);
+  } catch (error) {
+    console.error("Error fetching videos:", error);
+    if (error instanceof Error) {
+      console.error("Error details:", error.message);
+    }
+    return NextResponse.json({ error: "Failed to fetch videos" }, { status: 500 });
+  }
 }

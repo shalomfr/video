@@ -117,13 +117,13 @@ export async function POST(
         message: "יצירת הסרטון החלה",
       });
     }
-
-    return NextResponse.json({
-      videoId: video.id,
-      message: "יצירת הסרטון החלה",
-    });
   } catch (error) {
     console.error("Video generation error:", error);
+
+    // Log more details for debugging
+    if (error instanceof Error) {
+      console.error("Error details:", error.message, error.stack);
+    }
 
     return NextResponse.json(
       { error: "שגיאה בהתחלת יצירת הסרטון" },
