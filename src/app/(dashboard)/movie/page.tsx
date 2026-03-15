@@ -108,14 +108,10 @@ const VISUAL_STYLES = [
 ];
 
 const DURATION_OPTIONS = [
+  { label: "15 שניות", value: 15, scenes: 2 },
   { label: "30 שניות", value: 30, scenes: 4 },
   { label: "1 דקה", value: 60, scenes: 8 },
   { label: "2 דקות", value: 120, scenes: 15 },
-  { label: "5 דקות", value: 300, scenes: 38 },
-  { label: "10 דקות", value: 600, scenes: 75 },
-  { label: "30 דקות", value: 1800, scenes: 225 },
-  { label: "60 דקות", value: 3600, scenes: 450 },
-  { label: "90 דקות", value: 5400, scenes: 675 },
 ];
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
@@ -146,7 +142,7 @@ export default function MoviePage() {
     genre: "drama",
     description: "",
     mood: "חם ונוסטלגי",
-    targetDuration: 120,
+    targetDuration: 30,
     visualStyle: "קולנועי קלאסי",
     colorPalette: ["#D4A574", "#2C3E50", "#F39C12"],
     characters: [{ name: "", description: "", role: "protagonist" }],
