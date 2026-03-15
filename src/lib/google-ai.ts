@@ -104,8 +104,8 @@ export async function planVideoScenes(
 // ===== 2. Video Generation with Veo 3.1 =====
 
 /**
- * Generate video from text prompt using Google Veo 3.1.
- * Uses the @google/genai SDK with predictLongRunning + polling.
+ * Generate video from text prompt using Runway Gen 4.5.
+ * Submits task, polls until done, downloads to disk.
  * Returns the local file path of the downloaded video.
  */
 export async function generateVideoFromText(
@@ -117,41 +117,51 @@ export async function generateVideoFromText(
     durationSeconds?: "4" | "6" | "8";
   } = {}
 ): Promise<string> {
-  const ai = getGenAI();
+  const RunwayML = (await import("@runwayml/sdk")).default;
+  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  console.log(`  [Veo 3.1] Generating video...`);
+  console.log(`  [Runway] Generating video...`);
 
-  let operation = await ai.models.generateVideos({
-    model: "veo-3.1-generate-preview",
-    prompt,
-    config: {
-      aspectRatio: options.aspectRatio || "16:9",
-      personGeneration: "allow_all" as any,
-    },
+  const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
+  const task = await client.textToVideo.create({
+    model: "gen4.5",
+    promptText: prompt,
+    ratio,
+    duration: 5,
   });
 
-  // Poll until done (every 10 seconds)
-  while (!operation.done) {
-    console.log(`  [Veo 3.1] Still generating...`);
-    await sleep(10000);
-    operation = await ai.operations.getVideosOperation({ operation });
+  // Poll until done
+  let status = "PENDING";
+  let videoUrl = "";
+  while (status === "PENDING" || status === "RUNNING") {
+    await sleep(5000);
+    console.log(`  [Runway] Still generating...`);
+    const result = await client.tasks.retrieve(task.id) as any;
+    status = result.status;
+    if (status === "SUCCEEDED" && result.output) {
+      videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
+    } else if (status === "FAILED") {
+      throw new Error("Runway video generation failed");
+    }
   }
 
   // Download the video
-  const video = operation.response?.generatedVideos?.[0]?.video;
-  if (!video) {
-    throw new Error("Veo 3.1 returned no video");
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) {
+    throw new Error(`Failed to download video: ${videoResponse.status}`);
   }
+  const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+  const path = await import("path");
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, videoBuffer);
 
-  await ai.files.download({ file: video, downloadPath: outputPath });
-  console.log(`  [Veo 3.1] Video saved to ${outputPath}`);
-
+  console.log(`  [Runway] Video saved to ${outputPath}`);
   return outputPath;
 }
 
 /**
- * Generate video from image + text prompt using Veo 3.1.
- * Uses the first frame as reference for visual continuity.
+ * Generate video from image + text prompt using Runway Gen 4.5.
+ * Uses the image as reference for visual continuity.
  */
 export async function generateVideoFromImage(
   prompt: string,
@@ -162,96 +172,51 @@ export async function generateVideoFromImage(
     aspectRatio?: "16:9" | "9:16";
   } = {}
 ): Promise<string> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY is not configured");
+  const RunwayML = (await import("@runwayml/sdk")).default;
+  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  console.log(`  [Veo 3.1] Generating video from image...`);
+  console.log(`  [Runway] Generating video from image...`);
 
-  // Read the image and convert to base64
   const imageBuffer = fs.readFileSync(imagePath);
   const imageBase64 = imageBuffer.toString("base64");
+  const mimeType = imagePath.endsWith(".png") ? "image/png" : "image/jpeg";
+  const dataUri = `data:${mimeType};base64,${imageBase64}`;
 
-  // Use REST API directly for image-to-video (SDK doesn't support it well yet)
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        instances: [
-          {
-            prompt,
-            image: {
-              inlineData: {
-                mimeType: "image/png",
-                data: imageBase64,
-              },
-            },
-          },
-        ],
-        parameters: {
-          aspectRatio: options.aspectRatio || "16:9",
-          personGeneration: "allow_all",
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Veo 3.1 API error: ${response.status} — ${err}`);
-  }
-
-  const { name: operationName } = await response.json();
+  const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
+  const task = await client.imageToVideo.create({
+    model: "gen4_turbo",
+    promptImage: dataUri,
+    promptText: prompt,
+    ratio,
+    duration: 5,
+  });
 
   // Poll until done
-  let done = false;
-  let videoUri = "";
-
-  while (!done) {
-    await sleep(10000);
-    console.log(`  [Veo 3.1] Still generating from image...`);
-
-    const statusResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
-      {
-        headers: { "x-goog-api-key": apiKey },
-      }
-    );
-
-    if (!statusResponse.ok) {
-      throw new Error(`Polling failed: ${statusResponse.status}`);
-    }
-
-    const status = await statusResponse.json();
-
-    if (status.done) {
-      done = true;
-      videoUri =
-        status.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
-      if (!videoUri) {
-        throw new Error("Veo 3.1 returned no video URI");
-      }
+  let status = "PENDING";
+  let videoUrl = "";
+  while (status === "PENDING" || status === "RUNNING") {
+    await sleep(5000);
+    console.log(`  [Runway] Still generating from image...`);
+    const result = await client.tasks.retrieve(task.id) as any;
+    status = result.status;
+    if (status === "SUCCEEDED" && result.output) {
+      videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
+    } else if (status === "FAILED") {
+      throw new Error("Runway image-to-video generation failed");
     }
   }
 
   // Download the video
-  const videoResponse = await fetch(videoUri, {
-    headers: { "x-goog-api-key": apiKey },
-  });
-
+  const videoResponse = await fetch(videoUrl);
   if (!videoResponse.ok) {
     throw new Error(`Failed to download video: ${videoResponse.status}`);
   }
-
   const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-  fs.mkdirSync(require("path").dirname(outputPath), { recursive: true });
+  const pathMod = await import("path");
+  fs.mkdirSync(pathMod.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, videoBuffer);
 
-  console.log(`  [Veo 3.1] Video saved to ${outputPath}`);
+  console.log(`  [Runway] Video saved to ${outputPath}`);
   return outputPath;
 }
 
@@ -337,62 +302,41 @@ export async function concatenateVideoScenes(
   });
 }
 
-// ===== 5. Veo Operation Status Polling =====
+// ===== 5. Runway Task Status Polling =====
 
 export interface VeoOperationStatus {
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
-  output?: string; // video URI
+  output?: string; // video URL
   failure?: string;
 }
 
 /**
- * Check the status of a Veo 3.1 operation by its operation name.
- * Returns a status object compatible with the video status route.
+ * Check the status of a Runway task by its ID.
  */
 export async function getVeoOperationStatus(
-  operationName: string
+  taskId: string
 ): Promise<VeoOperationStatus> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY is not configured");
+  const RunwayML = (await import("@runwayml/sdk")).default;
+  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
-    {
-      headers: { "x-goog-api-key": apiKey },
-    }
-  );
+  const task = await client.tasks.retrieve(taskId);
 
-  if (!response.ok) {
-    throw new Error(`Veo operation polling failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (data.done) {
-    const videoUri =
-      data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
-    if (videoUri) {
-      // Construct downloadable URL with API key
-      const downloadUrl = `${videoUri}&key=${apiKey}`;
+  switch (task.status) {
+    case "SUCCEEDED":
       return {
         status: "SUCCEEDED",
-        output: downloadUrl,
+        output: Array.isArray(task.output) ? task.output[0] : task.output,
       };
-    }
-    // Done but no video = error
-    const error = data.error?.message || "Veo returned no video";
-    return {
-      status: "FAILED",
-      failure: error,
-    };
+    case "FAILED":
+      return {
+        status: "FAILED",
+        failure: (task as any).failure || "Video generation failed",
+      };
+    case "RUNNING":
+      return { status: "RUNNING" };
+    default:
+      return { status: "PENDING" };
   }
-
-  // Not done yet
-  if (data.metadata) {
-    return { status: "RUNNING" };
-  }
-
-  return { status: "PENDING" };
 }
 
 // ===== Utilities =====
@@ -400,50 +344,24 @@ export async function getVeoOperationStatus(
 // ===== Legacy Aliases (for existing routes) =====
 
 /**
- * Legacy wrapper — existing routes call generateVideoSegment() which returns a taskId.
- * Now uses Veo 3.1 REST API directly and returns the operation name as "taskId".
+ * Submit a video generation task to Runway Gen 4.5.
+ * Returns the task ID for polling.
  */
 export async function generateVideoSegment(
   prompt: string,
-  referenceImages?: string[]
+  _referenceImages?: string[]
 ): Promise<string> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error("GOOGLE_AI_API_KEY is not configured");
+  const RunwayML = (await import("@runwayml/sdk")).default;
+  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  const instances: any[] = [{ prompt }];
-  if (referenceImages?.length) {
-    instances[0].referenceImages = referenceImages.map((img) => ({
-      image: { inlineData: { mimeType: "image/png", data: img } },
-      referenceType: "asset",
-    }));
-  }
+  const task = await client.textToVideo.create({
+    model: "gen4.5",
+    promptText: prompt,
+    ratio: "1280:720",
+    duration: 5,
+  });
 
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        instances,
-        parameters: {
-          aspectRatio: "16:9",
-          resolution: "720p",
-          personGeneration: "allow_all",
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Veo 3.1 API error: ${response.status} — ${err}`);
-  }
-
-  const { name } = await response.json();
-  return name; // operation name used as taskId
+  return task.id;
 }
 
 function sleep(ms: number): Promise<void> {
