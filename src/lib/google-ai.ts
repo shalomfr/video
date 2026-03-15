@@ -130,19 +130,28 @@ export async function generateVideoFromText(
     duration: 5,
   });
 
-  // Poll until done
+  // Poll until done (handle THROTTLED status too)
   let status = "PENDING";
   let videoUrl = "";
-  while (status === "PENDING" || status === "RUNNING") {
+  let attempts = 0;
+  while (attempts < 120) {
     await sleep(5000);
-    console.log(`  [Runway] Still generating...`);
+    attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
     status = result.status;
+    console.log(`  [Runway] Status: ${status} (attempt ${attempts})`);
+
     if (status === "SUCCEEDED" && result.output) {
       videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
+      break;
     } else if (status === "FAILED") {
-      throw new Error("Runway video generation failed");
+      throw new Error(`Runway video generation failed: ${JSON.stringify(result.failure || result.failureCode || 'unknown')}`);
     }
+    // PENDING, RUNNING, THROTTLED — keep polling
+  }
+
+  if (!videoUrl) {
+    throw new Error(`Runway generation timed out after ${attempts} attempts (last status: ${status})`);
   }
 
   // Download the video
@@ -191,19 +200,28 @@ export async function generateVideoFromImage(
     duration: 5,
   });
 
-  // Poll until done
+  // Poll until done (handle THROTTLED status too)
   let status = "PENDING";
   let videoUrl = "";
-  while (status === "PENDING" || status === "RUNNING") {
+  let attempts = 0;
+  while (attempts < 120) {
     await sleep(5000);
-    console.log(`  [Runway] Still generating from image...`);
+    attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
     status = result.status;
+    console.log(`  [Runway] Image-to-video status: ${status} (attempt ${attempts})`);
+
     if (status === "SUCCEEDED" && result.output) {
       videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
+      break;
     } else if (status === "FAILED") {
-      throw new Error("Runway image-to-video generation failed");
+      throw new Error(`Runway image-to-video failed: ${JSON.stringify(result.failure || result.failureCode || 'unknown')}`);
     }
+    // PENDING, RUNNING, THROTTLED — keep polling
+  }
+
+  if (!videoUrl) {
+    throw new Error(`Runway image-to-video timed out after ${attempts} attempts (last status: ${status})`);
   }
 
   // Download the video
