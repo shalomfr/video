@@ -53,9 +53,10 @@ export async function planFullMovie(
       {
         role: 'user',
         content: `${JSON.stringify(brief, null, 2)}\n\n` +
-          `CRITICAL CONSTRAINT: The target duration is ${brief.targetDuration} seconds. ` +
-          `Each scene is exactly 8 seconds. You MUST create exactly ${Math.ceil(brief.targetDuration / 8)} scenes. ` +
-          `Do NOT create more scenes than this number.`,
+          `CRITICAL CONSTRAINTS:\n` +
+          `1. Target duration: ${brief.targetDuration} seconds. Each scene = 8 seconds. Create EXACTLY ${Math.ceil(brief.targetDuration / 8)} scenes.\n` +
+          `2. Respond with ONLY valid JSON. No explanations, no comments, no text outside the JSON object.\n` +
+          `3. Start your response with { and end with }`,
       },
     ],
     response_format: { type: 'json_object' },
@@ -64,7 +65,13 @@ export async function planFullMovie(
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error('No response for narrative planning');
 
-  const plan = JSON.parse(extractJSON(content)) as NarrativePlan;
+  let plan: NarrativePlan;
+  try {
+    plan = JSON.parse(extractJSON(content)) as NarrativePlan;
+  } catch (e) {
+    console.error('Failed to parse narrative plan. Raw response:', content.slice(0, 300));
+    throw new Error(`Narrative planning returned invalid JSON: ${(e as Error).message}`);
+  }
 
   plan.styleGuide = {
     colorPalette: plan.styleGuide?.colorPalette || ['cinematic natural'],
