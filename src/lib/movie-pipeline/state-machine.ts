@@ -8,6 +8,7 @@ import type {
   NarrativePlan,
   PipelineStage,
   PipelineOptions,
+  PipelineProgressEvent,
 } from './types';
 import { buildContinuityDocument, updateContinuityAfterScene, getReferenceImageForScene } from './continuity';
 import { planFullMovie, planMovieOutline, planActScenes, generateScenePrompt, refinePrompt } from './prompt-builder';
@@ -20,14 +21,15 @@ import { generateSrtFile, burnSubtitles } from './subtitles';
 // Feature-length threshold: above this, plan act-by-act
 const LONG_MOVIE_THRESHOLD = 300; // 5 minutes
 
-const DEFAULT_OPTIONS: Required<PipelineOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<PipelineOptions, 'onProgress'>> & Pick<PipelineOptions, 'onProgress'> = {
   dryRun: false,
   singleScene: -1,
-  batchSize: 3,
+  batchSize: 4,
   maxRetries: 3,
   videoModel: 'veo',
   outputDir: './output',
   stateDir: './output/state',
+  onProgress: undefined,
 };
 
 // ===== State Persistence =====
@@ -67,44 +69,51 @@ function createInitialState(brief: MovieBrief): MovieState {
   };
 }
 
-// ===== Logging =====
+// ===== Logging + Progress =====
 
-function log(stage: PipelineStage, message: string): void {
-  const timestamp = new Date().toISOString().slice(11, 19);
-  console.log(`[${timestamp}] [${stage}] ${message}`);
+function createProgressLogger(onProgress?: PipelineOptions['onProgress']) {
+  return function emit(
+    stage: PipelineStage,
+    type: PipelineProgressEvent['type'],
+    message: string,
+    extra?: { sceneNumber?: number; meta?: Record<string, unknown> }
+  ): void {
+    const timestamp = new Date().toISOString().slice(11, 19);
+    console.log(`[${timestamp}] [${stage}] ${message}`);
+
+    onProgress?.({
+      timestamp: new Date().toISOString(),
+      stage,
+      type,
+      message,
+      sceneNumber: extra?.sceneNumber,
+      meta: extra?.meta,
+    });
+  };
 }
 
 // ===== Narrative Planning Strategies =====
 
-/**
- * For short/medium films (< 5 min): plan everything at once.
- */
 async function planShortMovie(brief: MovieBrief): Promise<NarrativePlan> {
   return await planFullMovie(brief);
 }
 
-/**
- * For feature-length films (> 5 min): plan outline first, then each act separately.
- * This avoids hitting context limits and produces better detail per scene.
- */
 async function planLongMovie(
   brief: MovieBrief,
-  onProgress?: (message: string) => void
+  emit: ReturnType<typeof createProgressLogger>
 ): Promise<NarrativePlan> {
-  // Step 1: High-level outline
-  onProgress?.('Creating movie outline...');
+  emit('NARRATIVE_PLANNING', 'detail', 'Creating movie outline...');
   const outline = await planMovieOutline(brief);
 
-  // Step 2: Plan each act's scenes in detail
   const allScenes: NarrativePlan['scenes'] = [];
   let sceneOffset = 0;
 
   for (const act of outline.acts) {
-    onProgress?.(`Planning Act ${act.actNumber}: "${act.title}" (${act.sceneCount} scenes)...`);
+    emit('NARRATIVE_PLANNING', 'detail', `Planning Act ${act.actNumber}: "${act.title}" (${act.sceneCount} scenes)...`, {
+      meta: { actNumber: act.actNumber, sceneCount: act.sceneCount },
+    });
 
     const actScenes = await planActScenes(brief, outline, act);
-
-    // Renumber scenes globally
     for (const scene of actScenes) {
       scene.sceneNumber = sceneOffset + scene.sceneNumber;
       allScenes.push(scene);
@@ -112,7 +121,6 @@ async function planLongMovie(
     sceneOffset += actScenes.length;
   }
 
-  // Combine into final narrative plan
   return {
     title: outline.title,
     acts: outline.acts.map((act) => ({
@@ -143,16 +151,12 @@ async function planLongMovie(
 
 // ===== Main Pipeline Loop =====
 
-/**
- * The core movie generation loop.
- * A state machine that progresses through stages, persisting state after each step.
- * Supports any duration from 30 seconds to 90+ minutes.
- */
 export async function runMoviePipeline(
   briefOrStatePath: MovieBrief | string,
   opts: PipelineOptions = {}
 ): Promise<string> {
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  const emit = createProgressLogger(options.onProgress);
 
   // Initialize or resume state
   let state: MovieState;
@@ -160,10 +164,12 @@ export async function runMoviePipeline(
     const loaded = loadState(briefOrStatePath);
     if (!loaded) throw new Error(`Cannot resume: state file not found at ${briefOrStatePath}`);
     state = loaded;
-    log(state.stage, `Resuming pipeline from stage: ${state.stage}`);
+    emit(state.stage, 'detail', `Resuming pipeline from stage: ${state.stage}`);
   } else {
     state = createInitialState(briefOrStatePath);
-    log('NARRATIVE_PLANNING', `Starting new movie pipeline: ${state.id}`);
+    emit('NARRATIVE_PLANNING', 'stage_start', `Starting new movie pipeline: ${state.id}`, {
+      meta: { movieId: state.id },
+    });
   }
 
   const clipsDir = path.join(options.outputDir, state.id, 'clips');
@@ -175,20 +181,19 @@ export async function runMoviePipeline(
 
         // ============================================================
         // STAGE 1: NARRATIVE PLANNING
-        // Claude plans the movie — short films at once, long films act-by-act
         // ============================================================
         case 'NARRATIVE_PLANNING': {
           const duration = state.brief.targetDuration;
           const isLong = duration > LONG_MOVIE_THRESHOLD;
           const sceneEstimate = Math.ceil(duration / 8);
 
-          log('NARRATIVE_PLANNING', `Planning ${isLong ? 'feature-length' : 'short'} movie (${duration}s, ~${sceneEstimate} scenes)...`);
+          emit('NARRATIVE_PLANNING', 'stage_start', `Planning ${isLong ? 'feature-length' : 'short'} movie (${duration}s, ~${sceneEstimate} scenes)...`, {
+            meta: { duration, sceneEstimate, isLong },
+          });
 
           let narrative: NarrativePlan;
           if (isLong) {
-            narrative = await planLongMovie(state.brief, (msg) =>
-              log('NARRATIVE_PLANNING', msg)
-            );
+            narrative = await planLongMovie(state.brief, emit);
           } else {
             narrative = await planShortMovie(state.brief);
           }
@@ -196,7 +201,6 @@ export async function runMoviePipeline(
           state.narrative = narrative;
           state.continuityDoc = buildContinuityDocument(narrative);
 
-          // Convert planned scenes to runtime MovieScenes
           state.scenes = narrative.scenes.map((s) => ({
             sceneNumber: s.sceneNumber,
             actNumber: s.actNumber,
@@ -218,42 +222,39 @@ export async function runMoviePipeline(
             narrationAudioPath: null,
           }));
 
-          // Filter to single scene if requested
           if (options.singleScene > 0) {
             state.scenes = state.scenes.filter(
               (s) => s.sceneNumber === options.singleScene
             );
           }
 
-          log('NARRATIVE_PLANNING', `Planned ${state.scenes.length} scenes across ${narrative.acts.length} acts (total: ${narrative.totalDuration}s)`);
+          emit('NARRATIVE_PLANNING', 'stage_end', `Planned ${state.scenes.length} scenes across ${narrative.acts.length} acts (total: ${narrative.totalDuration}s)`, {
+            meta: { totalScenes: state.scenes.length, totalActs: narrative.acts.length, totalDuration: narrative.totalDuration },
+          });
           state.stage = 'SCENE_PROMPTING';
           break;
         }
 
         // ============================================================
         // STAGE 2: SCENE PROMPTING
-        // Claude generates detailed video prompts for each scene.
-        // For long movies, processes act-by-act to manage context.
         // ============================================================
         case 'SCENE_PROMPTING': {
           const unprompted = state.scenes.filter((s) => !s.promptGenerated);
-          log('SCENE_PROMPTING', `Generating prompts for ${unprompted.length} scenes...`);
+          emit('SCENE_PROMPTING', 'stage_start', `Generating prompts for ${unprompted.length} scenes...`);
 
-          // Process act by act for better context management
           const actNumbers = [...new Set(unprompted.map((s) => s.actNumber))].sort();
 
           for (const actNum of actNumbers) {
             const actScenes = unprompted.filter((s) => s.actNumber === actNum);
-            log('SCENE_PROMPTING', `  Act ${actNum}: ${actScenes.length} scenes`);
+            emit('SCENE_PROMPTING', 'detail', `Act ${actNum}: ${actScenes.length} scenes`);
 
             for (const scene of actScenes) {
-              log('SCENE_PROMPTING', `    Scene ${scene.sceneNumber}: ${scene.description.slice(0, 50)}...`);
+              emit('SCENE_PROMPTING', 'scene_update', `Generating prompt for scene ${scene.sceneNumber}: ${scene.description.slice(0, 60)}...`, {
+                sceneNumber: scene.sceneNumber,
+              });
 
-              // Get reference image from previous scene for continuity
               const refImage = getReferenceImageForScene(state.scenes, scene.sceneNumber);
-              if (refImage) {
-                scene.lastFramePath = refImage;
-              }
+              if (refImage) scene.lastFramePath = refImage;
 
               const planned = state.narrative!.scenes.find(
                 (s) => s.sceneNumber === scene.sceneNumber
@@ -268,23 +269,26 @@ export async function runMoviePipeline(
               );
               scene.promptGenerated = true;
 
-              // Update continuity document
+              emit('SCENE_PROMPTING', 'scene_update', `Prompt ready for scene ${scene.sceneNumber} (${scene.finalPrompt.length} chars)`, {
+                sceneNumber: scene.sceneNumber,
+                meta: { promptLength: scene.finalPrompt.length },
+              });
+
               state.continuityDoc = updateContinuityAfterScene(
                 state.continuityDoc!,
                 scene
               );
 
-              // Save state periodically (every 10 scenes) for long movies
               if (scene.sceneNumber % 10 === 0) {
                 saveState(state, options.stateDir);
               }
             }
           }
 
-          log('SCENE_PROMPTING', `Generated ${unprompted.length} prompts`);
+          emit('SCENE_PROMPTING', 'stage_end', `Generated ${unprompted.length} prompts`);
 
           if (options.dryRun) {
-            log('SCENE_PROMPTING', 'DRY RUN — skipping video generation');
+            emit('SCENE_PROMPTING', 'detail', 'DRY RUN — skipping video generation');
             const promptsFile = path.join(options.outputDir, state.id, 'prompts.json');
             fs.mkdirSync(path.dirname(promptsFile), { recursive: true });
             fs.writeFileSync(promptsFile, JSON.stringify({
@@ -305,39 +309,44 @@ export async function runMoviePipeline(
 
         // ============================================================
         // STAGE 3: VIDEO GENERATION
-        // Submit prompts to Runway/Veo, poll, download clips.
-        // For long movies, processes act-by-act with state saves.
         // ============================================================
         case 'VIDEO_GENERATION': {
           const pendingScenes = state.scenes.filter((s) => s.status === 'PENDING');
           const totalScenes = state.scenes.length;
           const alreadyDone = state.scenes.filter((s) => s.status === 'GENERATED').length;
 
-          log('VIDEO_GENERATION', `Generating ${pendingScenes.length} scenes (${alreadyDone}/${totalScenes} already done)...`);
+          emit('VIDEO_GENERATION', 'stage_start', `Generating ${pendingScenes.length} scenes (${alreadyDone}/${totalScenes} already done)...`, {
+            meta: { pending: pendingScenes.length, total: totalScenes, done: alreadyDone },
+          });
 
-          // Process act by act — save state between acts for resume safety
           const actNumbers = [...new Set(pendingScenes.map((s) => s.actNumber))].sort();
 
           for (const actNum of actNumbers) {
             const actPending = pendingScenes.filter((s) => s.actNumber === actNum);
-            log('VIDEO_GENERATION', `  Act ${actNum}: generating ${actPending.length} scenes...`);
+            emit('VIDEO_GENERATION', 'detail', `Act ${actNum}: generating ${actPending.length} scenes...`);
 
             await processSceneBatch(
               actPending,
               clipsDir,
-              (scene, event) => {
-                log('VIDEO_GENERATION', `    Scene ${scene.sceneNumber}: ${event}`);
-              }
+              (scene, event, meta) => {
+                const type = event === 'error' ? 'error' : 'scene_update';
+                emit('VIDEO_GENERATION', type, `Scene ${scene.sceneNumber}: ${event}`, {
+                  sceneNumber: scene.sceneNumber,
+                  meta,
+                });
+              },
+              options.batchSize
             );
 
-            // Save state after each act completes
             saveState(state, options.stateDir);
-            log('VIDEO_GENERATION', `  Act ${actNum}: done. State saved.`);
+            emit('VIDEO_GENERATION', 'detail', `Act ${actNum}: done. State saved.`);
           }
 
           const generated = state.scenes.filter((s) => s.status === 'GENERATED').length;
           const failed = state.scenes.filter((s) => s.status === 'FAILED').length;
-          log('VIDEO_GENERATION', `Total: ${generated} generated, ${failed} failed out of ${totalScenes}`);
+          emit('VIDEO_GENERATION', 'stage_end', `Total: ${generated} generated, ${failed} failed out of ${totalScenes}`, {
+            meta: { generated, failed, total: totalScenes },
+          });
 
           state.stage = 'QUALITY_CHECK';
           break;
@@ -345,27 +354,31 @@ export async function runMoviePipeline(
 
         // ============================================================
         // STAGE 4: QUALITY CHECK
-        // Gemini analyzes each clip, retries if needed
         // ============================================================
         case 'QUALITY_CHECK': {
-          log('QUALITY_CHECK', 'Analyzing video quality...');
+          emit('QUALITY_CHECK', 'stage_start', 'Analyzing video quality...');
 
           const toCheck = state.scenes.filter(
             (s) => s.status === 'GENERATED' && s.qualityScore === null
           );
 
-          log('QUALITY_CHECK', `${toCheck.length} scenes to analyze`);
+          emit('QUALITY_CHECK', 'detail', `${toCheck.length} scenes to analyze`);
 
           for (const scene of toCheck) {
             if (!scene.videoUrl) continue;
 
-            log('QUALITY_CHECK', `  Scene ${scene.sceneNumber}: analyzing...`);
+            emit('QUALITY_CHECK', 'scene_update', `Scene ${scene.sceneNumber}: analyzing...`, {
+              sceneNumber: scene.sceneNumber,
+            });
+
             const qa = await analyzeVideoQuality(scene.videoUrl, scene.finalPrompt);
             scene.qualityScore = qa.qualityScore;
 
             if (qa.shouldRegenerate && scene.retryCount < options.maxRetries) {
-              log('QUALITY_CHECK', `  Scene ${scene.sceneNumber}: quality ${qa.qualityScore}/10, retrying (${scene.retryCount + 1}/${options.maxRetries})`);
-              log('QUALITY_CHECK', `    Issues: ${qa.issues.join(', ')}`);
+              emit('QUALITY_CHECK', 'scene_update', `Scene ${scene.sceneNumber}: quality ${qa.qualityScore}/10, retrying (${scene.retryCount + 1}/${options.maxRetries})`, {
+                sceneNumber: scene.sceneNumber,
+                meta: { qualityScore: qa.qualityScore, issues: qa.issues },
+              });
 
               scene.finalPrompt = await refinePrompt(
                 scene.finalPrompt,
@@ -377,24 +390,25 @@ export async function runMoviePipeline(
               scene.qualityScore = null;
               scene.retryCount++;
             } else {
-              log('QUALITY_CHECK', `  Scene ${scene.sceneNumber}: quality ${qa.qualityScore}/10 — OK`);
+              emit('QUALITY_CHECK', 'scene_update', `Scene ${scene.sceneNumber}: quality ${qa.qualityScore}/10 — OK`, {
+                sceneNumber: scene.sceneNumber,
+                meta: { qualityScore: qa.qualityScore },
+              });
             }
 
-            // Save periodically
             if (scene.sceneNumber % 10 === 0) {
               saveState(state, options.stateDir);
             }
           }
 
-          // If any scenes need retry, go back to generation
           const needsRetry = state.scenes.some((s) => s.status === 'PENDING');
           if (needsRetry) {
             const retryCount = state.scenes.filter((s) => s.status === 'PENDING').length;
-            log('QUALITY_CHECK', `${retryCount} scenes need retry — returning to VIDEO_GENERATION`);
+            emit('QUALITY_CHECK', 'detail', `${retryCount} scenes need retry — returning to VIDEO_GENERATION`);
             state.stage = 'VIDEO_GENERATION';
           } else {
-            // Go to narration if enabled, otherwise skip to concatenation
             const narrationEnabled = state.brief.narration?.enabled || state.brief.subtitles?.enabled;
+            emit('QUALITY_CHECK', 'stage_end', `Quality check complete`);
             state.stage = narrationEnabled ? 'NARRATION' : 'CONCATENATION';
           }
           break;
@@ -402,36 +416,38 @@ export async function runMoviePipeline(
 
         // ============================================================
         // STAGE 5: NARRATION
-        // Generate voice-over audio and subtitle files
         // ============================================================
         case 'NARRATION': {
           const generatedScenes = state.scenes.filter((s) => s.status === 'GENERATED');
-          log('NARRATION', `Processing narration for ${generatedScenes.length} scenes...`);
+          emit('NARRATION', 'stage_start', `Processing narration for ${generatedScenes.length} scenes...`);
 
           const narrationOutputDir = path.join(options.outputDir, state.id);
 
-          // Generate narration audio if enabled
           if (state.brief.narration?.enabled) {
             await processNarration(
               generatedScenes,
               state.brief,
               narrationOutputDir,
-              (msg) => log('NARRATION', msg)
+              (msg) => emit('NARRATION', 'detail', msg)
             );
 
             const withNarration = generatedScenes.filter((s) => s.narrationAudioPath);
-            log('NARRATION', `Generated audio for ${withNarration.length} scenes`);
+            emit('NARRATION', 'detail', `Generated audio for ${withNarration.length} scenes`);
           }
 
-          // Generate subtitles if enabled (uses narration texts)
           if (state.brief.subtitles?.enabled) {
-            // If no narration was generated, generate texts only for subtitles
             if (!state.brief.narration?.enabled) {
+              emit('NARRATION', 'detail', 'Generating subtitle texts...');
               const { generateNarrationTexts } = await import('./narration');
               const textsMap = await generateNarrationTexts(generatedScenes, state.brief);
               for (const scene of generatedScenes) {
                 const text = textsMap.get(scene.sceneNumber);
-                if (text) scene.narrationText = text;
+                if (text) {
+                  scene.narrationText = text;
+                  emit('NARRATION', 'scene_update', `Subtitle: "${text.slice(0, 60)}..."`, {
+                    sceneNumber: scene.sceneNumber,
+                  });
+                }
               }
             }
 
@@ -439,28 +455,30 @@ export async function runMoviePipeline(
             state.subtitlePath = generateSrtFile(generatedScenes, srtPath, {
               crossfadeDuration: 0.5,
             });
-            log('NARRATION', `Subtitle file created: ${state.subtitlePath}`);
+            emit('NARRATION', 'detail', `Subtitle file created: ${state.subtitlePath}`);
           }
 
           saveState(state, options.stateDir);
+          emit('NARRATION', 'stage_end', 'Narration complete');
           state.stage = 'CONCATENATION';
           break;
         }
 
         // ============================================================
         // STAGE 6: CONCATENATION
-        // FFmpeg combines all clips with transitions and soundtrack
         // ============================================================
         case 'CONCATENATION': {
           const validScenes = state.scenes.filter((s) => s.status === 'GENERATED');
           const totalDuration = validScenes.length * 8;
-          log('CONCATENATION', `Assembling ${validScenes.length} scenes (~${Math.round(totalDuration / 60)} minutes)...`);
+          emit('CONCATENATION', 'stage_start', `Assembling ${validScenes.length} scenes (~${Math.round(totalDuration / 60)} minutes)...`);
 
           const outputPath = path.join(
             options.outputDir,
             state.id,
             `${(state.narrative?.title || 'movie').replace(/[^a-zA-Z0-9]/g, '_')}.mp4`
           );
+
+          emit('CONCATENATION', 'detail', `Concatenating ${validScenes.length} clips with crossfade...`);
 
           state.finalVideoPath = await concatenateMovie(
             state.scenes,
@@ -473,11 +491,10 @@ export async function runMoviePipeline(
             }
           );
 
-          log('CONCATENATION', `Movie assembled: ${state.finalVideoPath}`);
+          emit('CONCATENATION', 'detail', `Movie assembled: ${state.finalVideoPath}`);
 
-          // Burn subtitles if enabled with burnIn option
           if (state.brief.subtitles?.enabled && state.brief.subtitles.burnIn && state.subtitlePath) {
-            log('CONCATENATION', 'Burning subtitles onto video...');
+            emit('CONCATENATION', 'detail', 'Burning subtitles onto video...');
             const subtitledPath = outputPath.replace('.mp4', '_subtitled.mp4');
             burnSubtitles(
               state.finalVideoPath,
@@ -488,29 +505,27 @@ export async function runMoviePipeline(
                 isRtl: state.brief.subtitles.language === 'he',
               }
             );
-            // Replace final video with subtitled version
             fs.unlinkSync(state.finalVideoPath);
             fs.renameSync(subtitledPath, state.finalVideoPath);
-            log('CONCATENATION', 'Subtitles burned successfully');
+            emit('CONCATENATION', 'detail', 'Subtitles burned successfully');
           }
 
-          log('CONCATENATION', `Final movie saved: ${state.finalVideoPath}`);
+          emit('CONCATENATION', 'stage_end', `Final movie saved: ${state.finalVideoPath}`);
           state.stage = 'DONE';
           break;
         }
       }
 
-      // Persist state after every stage transition
       saveState(state, options.stateDir);
     }
   } catch (error) {
     state.stage = 'FAILED';
     state.error = error instanceof Error ? error.message : String(error);
     saveState(state, options.stateDir);
-    log('FAILED', `Pipeline failed: ${state.error}`);
+    emit('FAILED', 'error', `Pipeline failed: ${state.error}`);
     throw error;
   }
 
-  log('DONE', `Pipeline complete! Movie: ${state.finalVideoPath}`);
+  emit('DONE', 'stage_end', `Pipeline complete! Movie: ${state.finalVideoPath}`);
   return state.finalVideoPath!;
 }

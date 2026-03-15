@@ -1,26 +1,22 @@
 import {
   generateVideoFromText as veoFromText,
   generateVideoFromImage as veoFromImage,
+  type PollProgressCallback,
 } from '../google-ai';
 import type { MovieScene } from './types';
 import fs from 'fs';
 import path from 'path';
 
 // ===== Configuration =====
-// Veo 3.1 has rate limits — process 2 at a time max
-const BATCH_SIZE = 2;
+const DEFAULT_BATCH_SIZE = 4;
+const INTER_BATCH_DELAY_MS = 2000;
 
 // ===== Video Generation =====
 
-/**
- * Generates video for a scene using Google Veo 3.1.
- * Uses image-to-video if a reference image exists (for continuity),
- * otherwise uses text-to-video.
- * Veo handles polling internally — returns when video is ready.
- */
 async function generateSceneVideo(
   scene: MovieScene,
-  outputDir: string
+  outputDir: string,
+  onPollProgress?: PollProgressCallback
 ): Promise<string> {
   const outputPath = path.join(
     outputDir,
@@ -32,39 +28,51 @@ async function generateSceneVideo(
     return await veoFromImage(scene.finalPrompt, scene.lastFramePath, outputPath, {
       resolution: '720p',
       aspectRatio: '16:9',
-    });
+    }, onPollProgress);
   } else {
     return await veoFromText(scene.finalPrompt, outputPath, {
       resolution: '720p',
       aspectRatio: '16:9',
-    });
+    }, onPollProgress);
   }
 }
 
 // ===== Batch Processing =====
 
-/**
- * Processes scenes in batches — generates videos and extracts frames.
- * Veo 3.1 saves directly to disk, no separate download needed.
- */
 export async function processSceneBatch(
   scenes: MovieScene[],
   outputDir: string,
-  onProgress?: (scene: MovieScene, event: string) => void
+  onProgress?: (scene: MovieScene, event: string, meta?: Record<string, unknown>) => void,
+  batchSize?: number
 ): Promise<MovieScene[]> {
-  const batches = chunk(scenes, BATCH_SIZE);
+  const size = batchSize || DEFAULT_BATCH_SIZE;
+  const batches = chunk(scenes, size);
 
-  for (const batch of batches) {
-    // Generate scenes in batch concurrently
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    const batch = batches[batchIdx];
+
     const promises = batch.map(async (scene) => {
       try {
-        onProgress?.(scene, 'generating');
+        onProgress?.(scene, 'submitting');
         scene.status = 'PROCESSING';
 
-        // Veo saves directly to disk — returns the local path
-        scene.localPath = await generateSceneVideo(scene, outputDir);
+        const pollCb: PollProgressCallback = (attempt, max, status) => {
+          if (status.startsWith('SUBMITTED:')) {
+            const taskId = status.replace('SUBMITTED:', '');
+            scene.taskId = taskId;
+            onProgress?.(scene, 'submitted', { taskId });
+          } else if (status === 'DOWNLOADING') {
+            onProgress?.(scene, 'downloading');
+          } else if (status.startsWith('DOWNLOADED:')) {
+            onProgress?.(scene, 'downloaded', { size: status.replace('DOWNLOADED:', '') });
+          } else {
+            onProgress?.(scene, 'polling', { attempt, maxAttempts: max, status });
+          }
+        };
 
-        // Extract last frame for continuity with next scene
+        scene.localPath = await generateSceneVideo(scene, outputDir, pollCb);
+
+        // Extract last frame for continuity
         scene.lastFramePath = await extractLastFrame(
           scene.localPath,
           outputDir,
@@ -81,9 +89,9 @@ export async function processSceneBatch(
 
     await Promise.all(promises);
 
-    // Delay between batches to respect Veo rate limits
-    if (batches.indexOf(batch) < batches.length - 1) {
-      await sleep(5000);
+    // Short delay between batches
+    if (batchIdx < batches.length - 1) {
+      await sleep(INTER_BATCH_DELAY_MS);
     }
   }
 
@@ -92,10 +100,6 @@ export async function processSceneBatch(
 
 // ===== Frame Extraction =====
 
-/**
- * Extracts the last frame from a video clip using FFmpeg.
- * This frame is used as reference image for the next scene (continuity).
- */
 export async function extractLastFrame(
   videoPath: string,
   outputDir: string,
@@ -106,7 +110,6 @@ export async function extractLastFrame(
     `scene_${String(sceneNumber).padStart(3, '0')}_lastframe.png`
   );
 
-  // Use FFmpeg to extract last frame
   const { execSync } = await import('child_process');
   try {
     execSync(
@@ -114,7 +117,6 @@ export async function extractLastFrame(
       { stdio: 'pipe' }
     );
   } catch {
-    // Fallback: extract frame at 90% of duration
     execSync(
       `ffmpeg -i "${videoPath}" -vf "select=eq(n\\,0)" -frames:v 1 -y "${framePath}"`,
       { stdio: 'pipe' }

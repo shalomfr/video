@@ -143,6 +143,16 @@ export interface MovieState {
   error: string | null;
 }
 
+// ===== Progress Events =====
+export interface PipelineProgressEvent {
+  timestamp: string;
+  stage: PipelineStage;
+  type: 'stage_start' | 'stage_end' | 'scene_update' | 'detail' | 'error';
+  message: string;
+  sceneNumber?: number;
+  meta?: Record<string, unknown>;
+}
+
 // ===== Pipeline Options =====
 export interface PipelineOptions {
   dryRun?: boolean;
@@ -152,4 +162,5 @@ export interface PipelineOptions {
   videoModel?: 'veo';
   outputDir?: string;
   stateDir?: string;
+  onProgress?: (event: PipelineProgressEvent) => void;
 }

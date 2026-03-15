@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Clapperboard,
   Play,
@@ -13,7 +13,10 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  Terminal,
 } from "lucide-react";
+import { useMovieProgress } from "@/hooks/use-movie-progress";
+import type { PipelineProgressEvent } from "@/lib/movie-pipeline/types";
 
 interface CharacterInput {
   name: string;
@@ -159,7 +162,7 @@ export default function MoviePage() {
     },
   });
 
-  const [status, setStatus] = useState<PipelineStatus>({
+  const [legacyStatus, setLegacyStatus] = useState<PipelineStatus>({
     stage: "IDLE",
     totalScenes: 0,
     completedScenes: 0,
@@ -167,8 +170,21 @@ export default function MoviePage() {
     message: "",
   });
 
+  const { state: sseState, connect: connectSSE, disconnect: disconnectSSE } = useMovieProgress();
+
   const [dryRun, setDryRun] = useState(false);
-  const [polling, setPolling] = useState(false);
+
+  // Derive status from SSE state when connected, otherwise from legacy
+  const status: PipelineStatus = sseState.stage
+    ? {
+        stage: sseState.stage as PipelineStage,
+        totalScenes: sseState.totalScenes,
+        completedScenes: sseState.completedScenes,
+        currentScene: 0,
+        message: sseState.latestMessage,
+        error: sseState.error || undefined,
+      }
+    : legacyStatus;
 
   const isRunning = !["IDLE", "DONE", "FAILED"].includes(status.stage);
 
@@ -236,7 +252,7 @@ export default function MoviePage() {
   async function startPipeline() {
     if (!brief.title || !brief.description) return;
 
-    setStatus({
+    setLegacyStatus({
       stage: "NARRATIVE_PLANNING",
       totalScenes: 0,
       completedScenes: 0,
@@ -257,13 +273,11 @@ export default function MoviePage() {
       }
 
       const data = await res.json();
-      setStatus((s) => ({ ...s, movieId: data.movieId }));
 
-      // Start polling for status
-      setPolling(true);
-      pollStatus(data.movieId);
+      // Connect SSE stream for real-time updates
+      connectSSE(data.movieId);
     } catch (error) {
-      setStatus({
+      setLegacyStatus({
         stage: "FAILED",
         totalScenes: 0,
         completedScenes: 0,
@@ -271,24 +285,6 @@ export default function MoviePage() {
         message: "",
         error: error instanceof Error ? error.message : "Unknown error",
       });
-    }
-  }
-
-  async function pollStatus(movieId: string) {
-    try {
-      const res = await fetch(`/api/movie/status?id=${movieId}`);
-      if (!res.ok) throw new Error("Failed to get status");
-
-      const data: PipelineStatus = await res.json();
-      setStatus(data);
-
-      if (data.stage !== "DONE" && data.stage !== "FAILED") {
-        setTimeout(() => pollStatus(movieId), 3000);
-      } else {
-        setPolling(false);
-      }
-    } catch {
-      setTimeout(() => pollStatus(movieId), 5000);
     }
   }
 
@@ -315,7 +311,7 @@ export default function MoviePage() {
 
       {/* Main Content */}
       {isRunning || status.stage === "DONE" || status.stage === "FAILED" ? (
-        <PipelineProgress status={status} onReset={() => setStatus({ stage: "IDLE", totalScenes: 0, completedScenes: 0, currentScene: 0, message: "" })} />
+        <PipelineProgress status={status} events={sseState.events} onReset={() => { setLegacyStatus({ stage: "IDLE", totalScenes: 0, completedScenes: 0, currentScene: 0, message: "" }); disconnectSSE(); }} />
       ) : (
         <div className="space-y-6">
           {/* Title & Genre */}
@@ -752,13 +748,88 @@ export default function MoviePage() {
   );
 }
 
+// ===== Live Log Component =====
+
+function LiveLog({ events }: { events: PipelineProgressEvent[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events.length]);
+
+  const stageColor = (stage: string) => {
+    switch (stage) {
+      case "NARRATIVE_PLANNING": return "text-blue-400";
+      case "SCENE_PROMPTING": return "text-purple-400";
+      case "VIDEO_GENERATION": return "text-amber-400";
+      case "QUALITY_CHECK": return "text-cyan-400";
+      case "NARRATION": return "text-pink-400";
+      case "CONCATENATION": return "text-green-400";
+      case "DONE": return "text-green-500";
+      case "FAILED": return "text-red-500";
+      default: return "text-zinc-400";
+    }
+  };
+
+  const stageShort = (stage: string) => {
+    switch (stage) {
+      case "NARRATIVE_PLANNING": return "PLAN";
+      case "SCENE_PROMPTING": return "PROMPT";
+      case "VIDEO_GENERATION": return "VIDEO";
+      case "QUALITY_CHECK": return "QA";
+      case "NARRATION": return "NARRATION";
+      case "CONCATENATION": return "CONCAT";
+      case "DONE": return "DONE";
+      case "FAILED": return "FAIL";
+      default: return stage;
+    }
+  };
+
+  if (events.length === 0) return null;
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-border p-6 space-y-3">
+      <h2 className="font-semibold text-lg flex items-center gap-2">
+        <Terminal className="w-5 h-5" />
+        תהליך חי
+      </h2>
+      <div
+        ref={scrollRef}
+        className="bg-zinc-950 rounded-xl p-4 font-mono text-xs max-h-72 overflow-y-auto space-y-0.5"
+        dir="ltr"
+      >
+        {events.map((e, i) => (
+          <div key={i} className="flex gap-2 leading-5">
+            <span className="text-zinc-600 shrink-0">
+              {e.timestamp?.slice(11, 19) || ""}
+            </span>
+            <span className={`shrink-0 font-semibold ${stageColor(e.stage)}`}>
+              [{stageShort(e.stage)}]
+            </span>
+            <span className="text-zinc-300 break-all">{e.message}</span>
+          </div>
+        ))}
+        {events.length > 0 && !["DONE", "FAILED"].includes(events[events.length - 1]?.stage) && (
+          <div className="flex gap-2 leading-5">
+            <span className="text-zinc-600 shrink-0 animate-pulse">...</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ===== Pipeline Progress Component =====
 
 function PipelineProgress({
   status,
+  events,
   onReset,
 }: {
   status: PipelineStatus;
+  events: PipelineProgressEvent[];
   onReset: () => void;
 }) {
   const currentStageIndex = STAGE_ORDER.indexOf(status.stage);
@@ -833,9 +904,14 @@ function PipelineProgress({
           </div>
         )}
 
-        {/* Message */}
-        {status.message && (
-          <p className="text-sm text-muted-foreground">{status.message}</p>
+        {/* Current Action Banner */}
+        {status.message && status.stage !== "DONE" && status.stage !== "FAILED" && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-primary/5 border border-primary/20">
+            <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+            <p className="text-sm text-primary font-medium truncate" dir="ltr">
+              {status.message}
+            </p>
+          </div>
         )}
 
         {/* Error */}
@@ -868,6 +944,9 @@ function PipelineProgress({
           </div>
         )}
       </div>
+
+      {/* Live Log */}
+      <LiveLog events={events} />
 
       {/* Scene List */}
       {status.scenes && status.scenes.length > 0 && (

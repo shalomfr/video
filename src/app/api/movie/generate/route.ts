@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { runMoviePipeline } from "@/lib/movie-pipeline/state-machine";
-import type { MovieBrief, PipelineOptions } from "@/lib/movie-pipeline/types";
+import type { MovieBrief, PipelineOptions, PipelineProgressEvent } from "@/lib/movie-pipeline/types";
+import { getEmitter, emitProgress, removeEmitter } from "@/lib/movie-pipeline/progress-emitter";
 import path from "path";
 
 // In-memory store for active pipelines (movieId -> status)
-// In production this would be Redis or database
 const activePipelines = new Map<
   string,
   {
@@ -58,6 +58,9 @@ export async function POST(request: Request) {
     // Generate a temp movieId for tracking
     const movieId = Math.random().toString(36).slice(2, 10);
 
+    // Initialize the emitter for SSE streaming
+    getEmitter(movieId);
+
     // Set initial status
     activePipelines.set(movieId, {
       stage: "NARRATIVE_PLANNING",
@@ -93,12 +96,27 @@ async function runPipelineWithTracking(
   options: PipelineOptions
 ) {
   try {
-    // We intercept the state machine's progress by watching the state file
-    const stateDir = options.stateDir || "./output/state";
-
     const result = await runMoviePipeline(brief, {
       ...options,
-      // We'll poll the state file from the status endpoint
+      onProgress: (event: PipelineProgressEvent) => {
+        // Emit to SSE stream
+        const emitter = getEmitter(movieId);
+        emitter.emit('progress', event);
+
+        // Also update in-memory status for fallback polling
+        activePipelines.set(movieId, {
+          stage: event.stage,
+          totalScenes: (event.meta?.total as number) || activePipelines.get(movieId)?.totalScenes || 0,
+          completedScenes: (event.meta?.generated as number) || activePipelines.get(movieId)?.completedScenes || 0,
+          currentScene: event.sceneNumber || activePipelines.get(movieId)?.currentScene || 0,
+          message: event.message,
+        });
+      },
+    });
+
+    // Emit final done event
+    emitProgress(movieId, 'DONE', 'stage_end', 'הסרט מוכן!', {
+      meta: { outputPath: result },
     });
 
     activePipelines.set(movieId, {
@@ -110,13 +128,20 @@ async function runPipelineWithTracking(
       outputPath: result,
     });
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Pipeline failed";
+
+    emitProgress(movieId, 'FAILED', 'error', errorMsg);
+
     activePipelines.set(movieId, {
       stage: "FAILED",
       totalScenes: 0,
       completedScenes: 0,
       currentScene: 0,
       message: "",
-      error: error instanceof Error ? error.message : "Pipeline failed",
+      error: errorMsg,
     });
+  } finally {
+    // Clean up emitter after 30 seconds (give SSE clients time to receive final event)
+    setTimeout(() => removeEmitter(movieId), 30000);
   }
 }

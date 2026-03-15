@@ -14,6 +14,7 @@ function extractJSON(text: string): string {
 
 let genAiClient: GoogleGenAI | null = null;
 let geminiClient: GoogleGenerativeAI | null = null;
+let runwayClient: any = null;
 
 function getGenAI(): GoogleGenAI {
   if (!genAiClient) {
@@ -32,6 +33,16 @@ function getGemini(): GoogleGenerativeAI {
   }
   return geminiClient;
 }
+
+async function getRunwayClient(): Promise<any> {
+  if (!runwayClient) {
+    const RunwayML = (await import("@runwayml/sdk")).default;
+    runwayClient = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
+  }
+  return runwayClient;
+}
+
+export type PollProgressCallback = (attempt: number, maxAttempts: number, status: string) => void;
 
 // ===== Types =====
 
@@ -115,10 +126,10 @@ export async function generateVideoFromText(
     resolution?: "720p" | "1080p";
     aspectRatio?: "16:9" | "9:16";
     durationSeconds?: "4" | "6" | "8";
-  } = {}
+  } = {},
+  onPollProgress?: PollProgressCallback
 ): Promise<string> {
-  const RunwayML = (await import("@runwayml/sdk")).default;
-  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
+  const client = await getRunwayClient();
 
   // Runway limits promptText to 1000 characters
   const truncatedPrompt = prompt.length > 1000 ? prompt.slice(0, 997) + '...' : prompt;
@@ -132,16 +143,21 @@ export async function generateVideoFromText(
     duration: 5,
   });
 
-  // Poll until done (handle THROTTLED status too)
+  onPollProgress?.(0, 120, `SUBMITTED:${task.id}`);
+
+  // Poll with adaptive interval: 2s for first 30s, then 5s
   let status = "PENDING";
   let videoUrl = "";
   let attempts = 0;
-  while (attempts < 120) {
-    await sleep(5000);
+  const MAX_ATTEMPTS = 120;
+  while (attempts < MAX_ATTEMPTS) {
+    const delay = attempts < 15 ? 2000 : 5000; // adaptive: 2s first 30s, then 5s
+    await sleep(delay);
     attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
     status = result.status;
     console.log(`  [Runway] Status: ${status} (attempt ${attempts})`);
+    onPollProgress?.(attempts, MAX_ATTEMPTS, status);
 
     if (status === "SUCCEEDED" && result.output) {
       videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
@@ -149,7 +165,6 @@ export async function generateVideoFromText(
     } else if (status === "FAILED") {
       throw new Error(`Runway video generation failed: ${JSON.stringify(result.failure || result.failureCode || 'unknown')}`);
     }
-    // PENDING, RUNNING, THROTTLED — keep polling
   }
 
   if (!videoUrl) {
@@ -157,6 +172,7 @@ export async function generateVideoFromText(
   }
 
   // Download the video
+  onPollProgress?.(attempts, MAX_ATTEMPTS, 'DOWNLOADING');
   const videoResponse = await fetch(videoUrl);
   if (!videoResponse.ok) {
     throw new Error(`Failed to download video: ${videoResponse.status}`);
@@ -166,7 +182,9 @@ export async function generateVideoFromText(
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, videoBuffer);
 
-  console.log(`  [Runway] Video saved to ${outputPath}`);
+  const sizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+  console.log(`  [Runway] Video saved to ${outputPath} (${sizeMB} MB)`);
+  onPollProgress?.(attempts, MAX_ATTEMPTS, `DOWNLOADED:${sizeMB}MB`);
   return outputPath;
 }
 
@@ -181,10 +199,10 @@ export async function generateVideoFromImage(
   options: {
     resolution?: "720p" | "1080p";
     aspectRatio?: "16:9" | "9:16";
-  } = {}
+  } = {},
+  onPollProgress?: PollProgressCallback
 ): Promise<string> {
-  const RunwayML = (await import("@runwayml/sdk")).default;
-  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
+  const client = await getRunwayClient();
 
   // Runway limits promptText to 1000 characters
   const truncatedPrompt = prompt.length > 1000 ? prompt.slice(0, 997) + '...' : prompt;
@@ -204,16 +222,21 @@ export async function generateVideoFromImage(
     duration: 5,
   });
 
-  // Poll until done (handle THROTTLED status too)
+  onPollProgress?.(0, 120, `SUBMITTED:${task.id}`);
+
+  // Poll with adaptive interval
   let status = "PENDING";
   let videoUrl = "";
   let attempts = 0;
-  while (attempts < 120) {
-    await sleep(5000);
+  const MAX_ATTEMPTS = 120;
+  while (attempts < MAX_ATTEMPTS) {
+    const delay = attempts < 15 ? 2000 : 5000;
+    await sleep(delay);
     attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
     status = result.status;
     console.log(`  [Runway] Image-to-video status: ${status} (attempt ${attempts})`);
+    onPollProgress?.(attempts, MAX_ATTEMPTS, status);
 
     if (status === "SUCCEEDED" && result.output) {
       videoUrl = Array.isArray(result.output) ? result.output[0] : result.output;
@@ -221,7 +244,6 @@ export async function generateVideoFromImage(
     } else if (status === "FAILED") {
       throw new Error(`Runway image-to-video failed: ${JSON.stringify(result.failure || result.failureCode || 'unknown')}`);
     }
-    // PENDING, RUNNING, THROTTLED — keep polling
   }
 
   if (!videoUrl) {
@@ -229,6 +251,7 @@ export async function generateVideoFromImage(
   }
 
   // Download the video
+  onPollProgress?.(attempts, MAX_ATTEMPTS, 'DOWNLOADING');
   const videoResponse = await fetch(videoUrl);
   if (!videoResponse.ok) {
     throw new Error(`Failed to download video: ${videoResponse.status}`);
@@ -238,7 +261,9 @@ export async function generateVideoFromImage(
   fs.mkdirSync(pathMod.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, videoBuffer);
 
-  console.log(`  [Runway] Video saved to ${outputPath}`);
+  const sizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+  console.log(`  [Runway] Video saved to ${outputPath} (${sizeMB} MB)`);
+  onPollProgress?.(attempts, MAX_ATTEMPTS, `DOWNLOADED:${sizeMB}MB`);
   return outputPath;
 }
 
@@ -338,8 +363,7 @@ export interface VeoOperationStatus {
 export async function getVeoOperationStatus(
   taskId: string
 ): Promise<VeoOperationStatus> {
-  const RunwayML = (await import("@runwayml/sdk")).default;
-  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
+  const client = await getRunwayClient();
 
   const task = await client.tasks.retrieve(taskId);
 
@@ -373,8 +397,7 @@ export async function generateVideoSegment(
   prompt: string,
   _referenceImages?: string[]
 ): Promise<string> {
-  const RunwayML = (await import("@runwayml/sdk")).default;
-  const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
+  const client = await getRunwayClient();
 
   const task = await client.textToVideo.create({
     model: "gen4.5",
