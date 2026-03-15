@@ -50,7 +50,13 @@ export async function planFullMovie(
     model: MODEL,
     messages: [
       { role: 'system', content: MOVIE_NARRATIVE_PROMPT },
-      { role: 'user', content: JSON.stringify(brief, null, 2) },
+      {
+        role: 'user',
+        content: `${JSON.stringify(brief, null, 2)}\n\n` +
+          `CRITICAL CONSTRAINT: The target duration is ${brief.targetDuration} seconds. ` +
+          `Each scene is exactly 8 seconds. You MUST create exactly ${Math.ceil(brief.targetDuration / 8)} scenes. ` +
+          `Do NOT create more scenes than this number.`,
+      },
     ],
     response_format: { type: 'json_object' },
   });
