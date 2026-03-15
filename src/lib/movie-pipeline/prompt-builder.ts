@@ -8,7 +8,7 @@ import type {
 } from './types';
 import { formatContinuityForPrompt } from './continuity';
 
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 let _gemini: GoogleGenerativeAI | null = null;
 function getGemini(): GoogleGenerativeAI {
