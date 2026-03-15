@@ -1,5 +1,13 @@
 import OpenAI from "openai";
 
+function extractJSON(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenced) return fenced[1].trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) return jsonMatch[0];
+  return text;
+}
+
 let _client: OpenAI | null = null;
 function getClient(): OpenAI {
   if (!_client) {
@@ -49,7 +57,7 @@ export async function extractBriefFromConversation(
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from AI");
-  return JSON.parse(content);
+  return JSON.parse(extractJSON(content));
 }
 
 export async function generateVideoPrompt(briefData: Record<string, unknown>) {
