@@ -137,7 +137,7 @@ export async function generateVideoFromText(
 
   const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
   const task = await client.textToVideo.create({
-    model: "gen4_turbo",
+    model: "gen3a_turbo",
     promptText: truncatedPrompt,
     ratio,
     duration: 5,
@@ -215,7 +215,7 @@ export async function generateVideoFromImage(
 
   const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
   const task = await client.imageToVideo.create({
-    model: "gen4_turbo",
+    model: "gen3a_turbo",
     promptImage: dataUri,
     promptText: truncatedPrompt,
     ratio,
@@ -400,7 +400,7 @@ export async function generateVideoSegment(
   const client = await getRunwayClient();
 
   const task = await client.textToVideo.create({
-    model: "gen4_turbo",
+    model: "gen3a_turbo",
     promptText: prompt,
     ratio: "1280:720",
     duration: 5,
