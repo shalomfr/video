@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
-  Terminal,
+  FolderOpen,
 } from "lucide-react";
 import { useMovieProgress } from "@/hooks/use-movie-progress";
+import { useMovieProjects } from "@/hooks/use-movie-projects";
+import { DirectorView } from "@/components/movie/director-view";
 import type { PipelineProgressEvent } from "@/lib/movie-pipeline/types";
 
 interface CharacterInput {
@@ -311,7 +313,19 @@ export default function MoviePage() {
 
       {/* Main Content */}
       {isRunning || status.stage === "DONE" || status.stage === "FAILED" ? (
-        <PipelineProgress status={status} events={sseState.events} onReset={() => { setLegacyStatus({ stage: "IDLE", totalScenes: 0, completedScenes: 0, currentScene: 0, message: "" }); disconnectSSE(); }} />
+        <DirectorView
+          stage={sseState.stage || status.stage}
+          events={sseState.events}
+          latestMessage={sseState.latestMessage || status.message}
+          totalScenes={sseState.totalScenes || status.totalScenes}
+          completedScenes={sseState.completedScenes || status.completedScenes}
+          error={sseState.error || status.error || null}
+          title={brief.title}
+          genre={brief.genre}
+          targetDuration={brief.targetDuration}
+          outputPath={status.outputPath}
+          onReset={() => { setLegacyStatus({ stage: "IDLE", totalScenes: 0, completedScenes: 0, currentScene: 0, message: "" }); disconnectSSE(); }}
+        />
       ) : (
         <div className="space-y-6">
           {/* Title & Genre */}
@@ -748,243 +762,4 @@ export default function MoviePage() {
   );
 }
 
-// ===== Live Log Component =====
-
-function LiveLog({ events }: { events: PipelineProgressEvent[] }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events.length]);
-
-  const stageColor = (stage: string) => {
-    switch (stage) {
-      case "NARRATIVE_PLANNING": return "text-blue-400";
-      case "SCENE_PROMPTING": return "text-purple-400";
-      case "VIDEO_GENERATION": return "text-amber-400";
-      case "QUALITY_CHECK": return "text-cyan-400";
-      case "NARRATION": return "text-pink-400";
-      case "CONCATENATION": return "text-green-400";
-      case "DONE": return "text-green-500";
-      case "FAILED": return "text-red-500";
-      default: return "text-zinc-400";
-    }
-  };
-
-  const stageShort = (stage: string) => {
-    switch (stage) {
-      case "NARRATIVE_PLANNING": return "PLAN";
-      case "SCENE_PROMPTING": return "PROMPT";
-      case "VIDEO_GENERATION": return "VIDEO";
-      case "QUALITY_CHECK": return "QA";
-      case "NARRATION": return "NARRATION";
-      case "CONCATENATION": return "CONCAT";
-      case "DONE": return "DONE";
-      case "FAILED": return "FAIL";
-      default: return stage;
-    }
-  };
-
-  if (events.length === 0) return null;
-
-  return (
-    <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-border p-6 space-y-3">
-      <h2 className="font-semibold text-lg flex items-center gap-2">
-        <Terminal className="w-5 h-5" />
-        תהליך חי
-      </h2>
-      <div
-        ref={scrollRef}
-        className="bg-zinc-950 rounded-xl p-4 font-mono text-xs max-h-72 overflow-y-auto space-y-0.5"
-        dir="ltr"
-      >
-        {events.map((e, i) => (
-          <div key={i} className="flex gap-2 leading-5">
-            <span className="text-zinc-600 shrink-0">
-              {e.timestamp?.slice(11, 19) || ""}
-            </span>
-            <span className={`shrink-0 font-semibold ${stageColor(e.stage)}`}>
-              [{stageShort(e.stage)}]
-            </span>
-            <span className="text-zinc-300 break-all">{e.message}</span>
-          </div>
-        ))}
-        {events.length > 0 && !["DONE", "FAILED"].includes(events[events.length - 1]?.stage) && (
-          <div className="flex gap-2 leading-5">
-            <span className="text-zinc-600 shrink-0 animate-pulse">...</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ===== Pipeline Progress Component =====
-
-function PipelineProgress({
-  status,
-  events,
-  onReset,
-}: {
-  status: PipelineStatus;
-  events: PipelineProgressEvent[];
-  onReset: () => void;
-}) {
-  const currentStageIndex = STAGE_ORDER.indexOf(status.stage);
-  const progress =
-    status.totalScenes > 0
-      ? Math.round((status.completedScenes / status.totalScenes) * 100)
-      : 0;
-
-  return (
-    <div className="space-y-6">
-      {/* Stage Progress */}
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-border p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">
-            {STAGE_LABELS[status.stage]}
-          </h2>
-          {status.stage === "DONE" || status.stage === "FAILED" ? (
-            <button
-              onClick={onReset}
-              className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium"
-            >
-              <RefreshCw className="w-4 h-4" />
-              סרט חדש
-            </button>
-          ) : (
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
-          )}
-        </div>
-
-        {/* Stage Steps */}
-        <div className="flex items-center gap-2">
-          {STAGE_ORDER.map((stage, i) => {
-            const isCurrent = stage === status.stage;
-            const isPast = i < currentStageIndex;
-            const isFailed = status.stage === "FAILED" && i === currentStageIndex;
-
-            return (
-              <div key={stage} className="flex-1 flex items-center gap-2">
-                <div
-                  className={`flex-1 h-2 rounded-full transition-all ${
-                    isPast || stage === "DONE" && status.stage === "DONE"
-                      ? "bg-green-500"
-                      : isCurrent
-                      ? "bg-primary animate-pulse"
-                      : isFailed
-                      ? "bg-red-500"
-                      : "bg-muted"
-                  }`}
-                />
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Stats */}
-        {status.totalScenes > 0 && (
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div className="p-3 rounded-xl bg-muted/50">
-              <div className="text-2xl font-bold">{status.totalScenes}</div>
-              <div className="text-xs text-muted-foreground">סצנות</div>
-            </div>
-            <div className="p-3 rounded-xl bg-muted/50">
-              <div className="text-2xl font-bold text-green-600">
-                {status.completedScenes}
-              </div>
-              <div className="text-xs text-muted-foreground">הושלמו</div>
-            </div>
-            <div className="p-3 rounded-xl bg-muted/50">
-              <div className="text-2xl font-bold text-primary">{progress}%</div>
-              <div className="text-xs text-muted-foreground">התקדמות</div>
-            </div>
-          </div>
-        )}
-
-        {/* Current Action Banner */}
-        {status.message && status.stage !== "DONE" && status.stage !== "FAILED" && (
-          <div className="flex items-center gap-2 p-3 rounded-xl bg-primary/5 border border-primary/20">
-            <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
-            <p className="text-sm text-primary font-medium truncate" dir="ltr">
-              {status.message}
-            </p>
-          </div>
-        )}
-
-        {/* Error */}
-        {status.error && (
-          <div className="flex items-start gap-2 p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-red-700 dark:text-red-400">
-                שגיאה
-              </p>
-              <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                {status.error}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Done */}
-        {status.stage === "DONE" && status.outputPath && (
-          <div className="flex items-start gap-2 p-4 rounded-xl bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800">
-            <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                הסרט מוכן!
-              </p>
-              <p className="text-sm text-green-600 dark:text-green-400 mt-1 font-mono direction-ltr text-start">
-                {status.outputPath}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Live Log */}
-      <LiveLog events={events} />
-
-      {/* Scene List */}
-      {status.scenes && status.scenes.length > 0 && (
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-border p-6 space-y-4">
-          <h2 className="font-semibold text-lg">סצנות</h2>
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {status.scenes.map((scene) => (
-              <div
-                key={scene.sceneNumber}
-                className="flex items-center gap-3 p-3 rounded-xl bg-muted/50"
-              >
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-sm font-bold text-primary">
-                  {scene.sceneNumber}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate">{scene.description}</p>
-                </div>
-                <div className="shrink-0">
-                  {scene.status === "GENERATED" ? (
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                  ) : scene.status === "PROCESSING" ? (
-                    <Loader2 className="w-5 h-5 text-primary animate-spin" />
-                  ) : scene.status === "FAILED" ? (
-                    <AlertCircle className="w-5 h-5 text-red-500" />
-                  ) : (
-                    <div className="w-5 h-5 rounded-full border-2 border-border" />
-                  )}
-                </div>
-                {scene.qualityScore !== null && (
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {scene.qualityScore}/10
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// Old LiveLog and PipelineProgress removed — replaced by DirectorView
