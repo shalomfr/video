@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
-import { Heebo } from "next/font/google";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { Toaster } from "sonner";
 import "./globals.css";
-
-const heebo = Heebo({
-  variable: "--font-heebo",
-  subsets: ["hebrew", "latin"],
-});
 
 export const metadata: Metadata = {
   title: "יוצר סרטונים AI - צור סרטוני תדמית בקלות",
@@ -22,7 +16,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl" suppressHydrationWarning>
-      <body className={`${heebo.variable} font-sans antialiased`} suppressHydrationWarning>
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="font-sans antialiased" style={{ fontFamily: "'Heebo', sans-serif" }} suppressHydrationWarning>
         <AuthProvider>
           {children}
           <Toaster position="top-center" dir="rtl" />
