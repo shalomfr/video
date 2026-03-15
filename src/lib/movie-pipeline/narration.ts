@@ -41,7 +41,7 @@ export async function generateNarrationTexts(
   brief: MovieBrief
 ): Promise<Map<number, string>> {
   const model = getGemini().getGenerativeModel({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.0-flash',
     generationConfig: { responseMimeType: 'application/json' },
   });
 

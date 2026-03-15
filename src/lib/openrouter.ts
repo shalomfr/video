@@ -11,7 +11,7 @@ function getGemini(): GoogleGenerativeAI {
   return gemini;
 }
 
-const MODEL = "gemini-2.0-flash-exp";
+const MODEL = "gemini-2.0-flash";
 
 export async function streamChatResponse(
   messages: { role: "system" | "user" | "assistant"; content: string }[]

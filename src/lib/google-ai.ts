@@ -60,7 +60,7 @@ export interface ConcatenationResult {
 export async function planVideoScenes(
   briefData: Record<string, unknown>
 ): Promise<VideoScenePlan> {
-  const model = getGemini().getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+  const model = getGemini().getGenerativeModel({ model: "gemini-2.0-flash" });
 
   const estimatedDuration = (briefData.videoLength as number) || 60;
   const sceneCount = Math.ceil(estimatedDuration / 8);
@@ -255,7 +255,7 @@ export async function analyzeVideoQuality(
   expectedPrompt: string
 ): Promise<QualityResult> {
   const model = getGemini().getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: "gemini-2.0-flash",
   });
 
   const prompt = `
