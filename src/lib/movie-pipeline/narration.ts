@@ -4,6 +4,14 @@ import fs from 'fs';
 import path from 'path';
 import type { MovieScene, MovieBrief } from './types';
 
+function extractJSON(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenced) return fenced[1].trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) return jsonMatch[0];
+  return text;
+}
+
 // ===== OpenRouter Client =====
 
 let _openrouter: OpenAI | null = null;
@@ -74,7 +82,7 @@ export async function generateNarrationTexts(
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error('No response for narration texts');
 
-  const parsed = JSON.parse(content) as {
+  const parsed = JSON.parse(extractJSON(content)) as {
     narrations: { sceneNumber: number; text: string }[];
   };
 
