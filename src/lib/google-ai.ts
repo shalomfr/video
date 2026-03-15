@@ -2,6 +2,14 @@ import { GoogleGenAI } from "@google/genai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "fs";
 
+function extractJSON(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fenced) return fenced[1].trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) return jsonMatch[0];
+  return text;
+}
+
 // ===== Clients =====
 
 let genAiClient: GoogleGenAI | null = null;
@@ -90,7 +98,7 @@ export async function planVideoScenes(
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response for scene planning");
-  return JSON.parse(content);
+  return JSON.parse(extractJSON(content));
 }
 
 // ===== 2. Video Generation with Veo 3.1 =====
@@ -287,8 +295,7 @@ export async function analyzeVideoQuality(
 
     const result = await model.generateContent([prompt, video]);
     const text = result.response.text();
-    const cleanText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    return JSON.parse(cleanText);
+    return JSON.parse(extractJSON(text));
   } catch (error) {
     console.error("Video quality analysis failed:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
