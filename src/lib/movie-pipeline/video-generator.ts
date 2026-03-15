@@ -8,8 +8,8 @@ import fs from 'fs';
 import path from 'path';
 
 // ===== Configuration =====
-const DEFAULT_BATCH_SIZE = 4;
-const INTER_BATCH_DELAY_MS = 2000;
+const DEFAULT_BATCH_SIZE = 5;
+const INTER_BATCH_DELAY_MS = 1000;
 
 // ===== Video Generation =====
 

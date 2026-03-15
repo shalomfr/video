@@ -348,12 +348,20 @@ export async function runMoviePipeline(
             meta: { generated, failed, total: totalScenes },
           });
 
-          state.stage = 'QUALITY_CHECK';
+          // Skip QA for short films (< 2 min) — go straight to narration/concat
+          const isShortFilm = state.brief.targetDuration <= 120;
+          if (isShortFilm) {
+            emit('VIDEO_GENERATION', 'detail', 'Short film — skipping quality check for speed');
+            const narrationEnabled = state.brief.narration?.enabled || state.brief.subtitles?.enabled;
+            state.stage = narrationEnabled ? 'NARRATION' : 'CONCATENATION';
+          } else {
+            state.stage = 'QUALITY_CHECK';
+          }
           break;
         }
 
         // ============================================================
-        // STAGE 4: QUALITY CHECK
+        // STAGE 4: QUALITY CHECK (only for long films)
         // ============================================================
         case 'QUALITY_CHECK': {
           emit('QUALITY_CHECK', 'stage_start', 'Analyzing video quality...');

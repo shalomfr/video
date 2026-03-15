@@ -137,7 +137,7 @@ export async function generateVideoFromText(
 
   const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
   const task = await client.textToVideo.create({
-    model: "gen4.5",
+    model: "gen4_turbo",
     promptText: truncatedPrompt,
     ratio,
     duration: 5,
@@ -145,13 +145,13 @@ export async function generateVideoFromText(
 
   onPollProgress?.(0, 120, `SUBMITTED:${task.id}`);
 
-  // Poll with adaptive interval: 2s for first 30s, then 5s
+  // Poll with adaptive interval: 2s for first 20s, then 3s
   let status = "PENDING";
   let videoUrl = "";
   let attempts = 0;
   const MAX_ATTEMPTS = 120;
   while (attempts < MAX_ATTEMPTS) {
-    const delay = attempts < 15 ? 2000 : 5000; // adaptive: 2s first 30s, then 5s
+    const delay = attempts < 10 ? 2000 : 3000; // adaptive: 2s first 20s, then 3s
     await sleep(delay);
     attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
@@ -224,13 +224,13 @@ export async function generateVideoFromImage(
 
   onPollProgress?.(0, 120, `SUBMITTED:${task.id}`);
 
-  // Poll with adaptive interval
+  // Poll with adaptive interval: 2s first 20s, then 3s
   let status = "PENDING";
   let videoUrl = "";
   let attempts = 0;
   const MAX_ATTEMPTS = 120;
   while (attempts < MAX_ATTEMPTS) {
-    const delay = attempts < 15 ? 2000 : 5000;
+    const delay = attempts < 10 ? 2000 : 3000;
     await sleep(delay);
     attempts++;
     const result = await client.tasks.retrieve(task.id) as any;
@@ -400,7 +400,7 @@ export async function generateVideoSegment(
   const client = await getRunwayClient();
 
   const task = await client.textToVideo.create({
-    model: "gen4.5",
+    model: "gen4_turbo",
     promptText: prompt,
     ratio: "1280:720",
     duration: 5,
