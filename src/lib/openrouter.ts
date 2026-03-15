@@ -1,20 +1,26 @@
 import OpenAI from "openai";
 
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY!,
-  defaultHeaders: {
-    "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-    "X-Title": "Video AI Creator",
-  },
-});
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    _client = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      defaultHeaders: {
+        "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
+        "X-Title": "Video AI Creator",
+      },
+    });
+  }
+  return _client;
+}
 
 const MODEL = "anthropic/claude-sonnet-4";
 
 export async function streamChatResponse(
   messages: { role: "system" | "user" | "assistant"; content: string }[]
 ) {
-  const response = await openrouter.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     messages,
     stream: true,
@@ -29,7 +35,7 @@ export async function extractBriefFromConversation(
     "./prompts/brief-extraction"
   );
 
-  const response = await openrouter.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     messages: [
       { role: "system", content: BRIEF_EXTRACTION_PROMPT },
@@ -49,7 +55,7 @@ export async function extractBriefFromConversation(
 export async function generateVideoPrompt(briefData: Record<string, unknown>) {
   const { VIDEO_PROMPT_GENERATION } = await import("./prompts/video-prompt");
 
-  const response = await openrouter.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     messages: [
       { role: "system", content: VIDEO_PROMPT_GENERATION },
