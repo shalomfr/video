@@ -138,6 +138,8 @@ function estimateTimeRemaining(pipelineStage: string | null, processingScenes: n
       return processingScenes * 45; // ~45 seconds per scene generation
     case 'QA':
       return processingScenes * 15; // ~15 seconds per quality check
+    case 'NARRATION':
+      return processingScenes * 10; // ~10 seconds per scene narration
     case 'JOINING':
       return 60; // 1 minute for concatenation
     case 'DONE':

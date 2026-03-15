@@ -40,9 +40,23 @@ export async function PUT(
   const { id } = await params;
   const body = await request.json();
 
+  // Whitelist allowed fields
+  const allowedFields = [
+    'businessName', 'industry', 'businessDesc', 'logoUrl',
+    'brandColors', 'style', 'targetAudience', 'videoLength',
+    'mood', 'additionalNotes', 'videoType',
+  ] as const;
+
+  const data: Record<string, unknown> = {};
+  for (const field of allowedFields) {
+    if (field in body) {
+      data[field] = body[field];
+    }
+  }
+
   const brief = await prisma.brief.update({
     where: { id, userId: session.user.id },
-    data: body,
+    data,
   });
 
   return NextResponse.json(brief);

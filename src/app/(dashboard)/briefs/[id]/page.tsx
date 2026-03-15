@@ -78,7 +78,7 @@ export default function BriefDetailPage() {
   };
 
   const hasExistingVideo = brief?.videos && brief.videos.length > 0;
-  const latestVideo = hasExistingVideo ? brief.videos[0] : null;
+  const latestVideo = hasExistingVideo ? brief!.videos![0] : null;
 
   if (loading) {
     return (

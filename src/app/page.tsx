@@ -20,10 +20,10 @@ export default function HomePage() {
             התחברות
           </Link>
           <Link
-            href="/register"
+            href="/login"
             className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition-opacity"
           >
-            הרשמה
+            כניסה
           </Link>
         </div>
       </header>
@@ -45,7 +45,7 @@ export default function HomePage() {
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Link
-            href="/register"
+            href="/login"
             className="px-8 py-3 bg-primary text-primary-foreground rounded-xl font-medium text-lg hover:opacity-90 transition-opacity"
           >
             התחל ליצור סרטון

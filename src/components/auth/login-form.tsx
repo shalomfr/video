@@ -134,10 +134,7 @@ export function LoginForm() {
         </button>
 
         <p className="text-center text-sm text-muted-foreground mt-6">
-          אין לך חשבון?{" "}
-          <Link href="/register" className="text-primary font-medium hover:underline">
-            הירשם עכשיו
-          </Link>
+          ההרשמה סגורה כרגע. פנה למנהל המערכת.
         </p>
       </div>
     </div>

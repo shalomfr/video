@@ -56,3 +56,9 @@ next-env.d.ts
 
 # claude settings
 .claude/
+
+# video output
+/output/
+
+# example files
+movie-brief-*.json

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateVideoPrompt } from "@/lib/openrouter";
-import { createVideoFromImage, createVideoFromText } from "@/lib/runway";
+import { generateVideoSegment } from "@/lib/google-ai";
 
 export async function POST(
   _request: Request,
@@ -62,7 +62,7 @@ export async function POST(
         briefId: id,
         conversationId: brief.conversationId,
         prompt: videoPrompt,
-        model: brief.logoUrl ? "gen4_turbo" : "gen4_turbo",
+        model: "veo-3.1",
         duration: brief.videoLength || 5,
         ratio: "1280:720",
         status: "PENDING",
@@ -76,22 +76,13 @@ export async function POST(
       data: { status: "GENERATING" },
     });
 
-    // Submit to Runway ML
-    let taskId: string;
-    if (brief.logoUrl) {
-      taskId = await createVideoFromImage(
-        videoPrompt,
-        brief.logoUrl,
-        brief.videoLength || 5
-      );
-    } else {
-      taskId = await createVideoFromText(
-        videoPrompt,
-        brief.videoLength || 5
-      );
-    }
+    // Submit to Google Veo 3.1
+    const taskId = await generateVideoSegment(
+      videoPrompt,
+      brief.logoUrl ? [brief.logoUrl] : undefined
+    );
 
-    // Update video with Runway task ID
+    // Update video with Veo operation ID
     await prisma.video.update({
       where: { id: video.id },
       data: { runwayTaskId: taskId, status: "PROCESSING" },

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { X, LayoutDashboard, Plus, Film, FileText, Settings } from "lucide-react";
+import { X, LayoutDashboard, Plus, Film, FileText, Settings, Clapperboard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "דשבורד", icon: LayoutDashboard },
   { href: "/create", label: "סרטון חדש", icon: Plus },
   { href: "/videos", label: "הסרטונים שלי", icon: Film },
+  { href: "/movie", label: "סרט קולנועי", icon: Clapperboard },
   { href: "/briefs", label: "בריפים", icon: FileText },
   { href: "/settings", label: "הגדרות", icon: Settings },
 ];

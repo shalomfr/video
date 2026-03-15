@@ -11,8 +11,14 @@ export default auth((req) => {
     "/videos",
     "/briefs",
     "/settings",
+    "/movie",
   ];
-  const authRoutes = ["/login", "/register"];
+  const authRoutes = ["/login"];
+
+  // Redirect /register to /login (registration disabled)
+  if (pathname.startsWith("/register")) {
+    return NextResponse.redirect(new URL("/login", req.nextUrl));
+  }
 
   const isProtected = protectedRoutes.some((route) =>
     pathname.startsWith(route)

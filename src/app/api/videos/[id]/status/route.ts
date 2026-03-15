@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getTaskStatus } from "@/lib/runway";
+import { getVeoOperationStatus } from "@/lib/google-ai";
 
 export async function GET(
   _request: Request,
@@ -54,9 +54,9 @@ export async function GET(
         }
 
         try {
-          const taskStatus = await getTaskStatus(video.runwayTaskId);
+          const opStatus = await getVeoOperationStatus(video.runwayTaskId);
 
-          switch (taskStatus.status) {
+          switch (opStatus.status) {
             case "PENDING":
               sendEvent({ status: "PENDING", message: "ממתין בתור..." });
               return true;
@@ -69,27 +69,25 @@ export async function GET(
               return true;
 
             case "SUCCEEDED": {
-              const videoUrl = Array.isArray(taskStatus.output)
-                ? taskStatus.output[0]
-                : taskStatus.output;
-
               await prisma.video.update({
                 where: { id: video.id },
                 data: {
                   status: "COMPLETED",
-                  videoUrl: videoUrl as string,
+                  videoUrl: opStatus.output!,
                   completedAt: new Date(),
                 },
               });
 
-              await prisma.conversation.update({
-                where: { id: video.conversationId! },
-                data: { status: "COMPLETED" },
-              });
+              if (video.conversationId) {
+                await prisma.conversation.update({
+                  where: { id: video.conversationId },
+                  data: { status: "COMPLETED" },
+                });
+              }
 
               sendEvent({
                 status: "COMPLETED",
-                videoUrl,
+                videoUrl: opStatus.output,
                 message: "הסרטון מוכן!",
               });
               return false;
@@ -100,15 +98,16 @@ export async function GET(
                 where: { id: video.id },
                 data: {
                   status: "FAILED",
-                  errorMessage:
-                    taskStatus.failure || "יצירת הסרטון נכשלה",
+                  errorMessage: opStatus.failure || "יצירת הסרטון נכשלה",
                 },
               });
 
-              await prisma.conversation.update({
-                where: { id: video.conversationId! },
-                data: { status: "FAILED" },
-              });
+              if (video.conversationId) {
+                await prisma.conversation.update({
+                  where: { id: video.conversationId },
+                  data: { status: "FAILED" },
+                });
+              }
 
               sendEvent({
                 status: "FAILED",

@@ -1,25 +1,52 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY!,
-  defaultHeaders: {
-    "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-    "X-Title": "Video AI Creator",
-  },
-});
+let gemini: GoogleGenerativeAI | null = null;
 
-const MODEL = "anthropic/claude-3.5-sonnet";
+function getGemini(): GoogleGenerativeAI {
+  if (!gemini) {
+    const key = process.env.GOOGLE_AI_API_KEY;
+    if (!key) throw new Error("GOOGLE_AI_API_KEY is not configured");
+    gemini = new GoogleGenerativeAI(key);
+  }
+  return gemini;
+}
+
+const MODEL = "gemini-2.0-flash-exp";
 
 export async function streamChatResponse(
   messages: { role: "system" | "user" | "assistant"; content: string }[]
 ) {
-  const response = await openrouter.chat.completions.create({
-    model: MODEL,
-    messages,
-    stream: true,
+  const model = getGemini().getGenerativeModel({ model: MODEL });
+
+  // Separate system instruction from chat messages
+  const systemMessage = messages.find((m) => m.role === "system");
+  const chatMessages = messages.filter((m) => m.role !== "system");
+
+  const chat = model.startChat({
+    systemInstruction: systemMessage?.content,
+    history: chatMessages.slice(0, -1).map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    })),
   });
-  return response;
+
+  const lastMessage = chatMessages[chatMessages.length - 1];
+  const result = await chat.sendMessageStream(lastMessage.content);
+
+  // Return an async iterable that mimics the OpenAI SDK format
+  // so the chat route doesn't need to change
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      for await (const chunk of result.stream) {
+        const text = chunk.text();
+        if (text) {
+          yield {
+            choices: [{ delta: { content: text } }],
+          };
+        }
+      }
+    },
+  };
 }
 
 export async function extractBriefFromConversation(
@@ -29,35 +56,36 @@ export async function extractBriefFromConversation(
     "./prompts/brief-extraction"
   );
 
-  const response = await openrouter.chat.completions.create({
+  const model = getGemini().getGenerativeModel({
     model: MODEL,
-    messages: [
-      { role: "system", content: BRIEF_EXTRACTION_PROMPT },
-      {
-        role: "user",
-        content: JSON.stringify(conversationMessages),
-      },
-    ],
-    response_format: { type: "json_object" },
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI");
-  return JSON.parse(content);
+  const result = await model.generateContent([
+    BRIEF_EXTRACTION_PROMPT,
+    `Here is the conversation to extract from:\n${JSON.stringify(conversationMessages)}`,
+  ]);
+
+  const content = result.response.text();
+  if (!content) throw new Error("No response from Gemini");
+
+  const cleanText = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  return JSON.parse(cleanText);
 }
 
 export async function generateVideoPrompt(briefData: Record<string, unknown>) {
   const { VIDEO_PROMPT_GENERATION } = await import("./prompts/video-prompt");
 
-  const response = await openrouter.chat.completions.create({
-    model: MODEL,
-    messages: [
-      { role: "system", content: VIDEO_PROMPT_GENERATION },
-      { role: "user", content: JSON.stringify(briefData) },
-    ],
-  });
+  const model = getGemini().getGenerativeModel({ model: MODEL });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from AI");
+  const result = await model.generateContent([
+    VIDEO_PROMPT_GENERATION,
+    JSON.stringify(briefData),
+  ]);
+
+  const content = result.response.text();
+  if (!content) throw new Error("No response from Gemini");
   return content;
 }
