@@ -1,20 +1,27 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import type { MovieScene, MovieBrief } from './types';
 
-// ===== Gemini Client =====
+// ===== OpenRouter Client =====
 
-let _gemini: GoogleGenerativeAI | null = null;
-function getGemini(): GoogleGenerativeAI {
-  if (!_gemini) {
-    const key = process.env.GOOGLE_AI_API_KEY;
-    if (!key) throw new Error('GOOGLE_AI_API_KEY is not configured');
-    _gemini = new GoogleGenerativeAI(key);
+let _openrouter: OpenAI | null = null;
+function getOpenRouter(): OpenAI {
+  if (!_openrouter) {
+    _openrouter = new OpenAI({
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      defaultHeaders: {
+        'HTTP-Referer': process.env.NEXTAUTH_URL || 'http://localhost:3000',
+        'X-Title': 'Movie Pipeline - Narration',
+      },
+    });
   }
-  return _gemini;
+  return _openrouter;
 }
+
+const MODEL = 'anthropic/claude-sonnet-4';
 
 // ===== Voice Map =====
 
@@ -40,11 +47,6 @@ export async function generateNarrationTexts(
   scenes: MovieScene[],
   brief: MovieBrief
 ): Promise<Map<number, string>> {
-  const model = getGemini().getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: { responseMimeType: 'application/json' },
-  });
-
   const language = brief.narration?.language || 'he';
   const style = brief.narration?.style || 'narrator';
 
@@ -54,32 +56,25 @@ export async function generateNarrationTexts(
     documentary: 'Write as a documentary narrator, factual and informative.',
   };
 
-  const prompt = `You are a professional voice-over writer for film.
-Generate short narration text for each scene of the movie "${brief.title}".
+  const response = await getOpenRouter().chat.completions.create({
+    model: MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a professional voice-over writer for film. Generate short narration text for each scene. Language: ${language === 'he' ? 'Hebrew' : 'English'}. Style: ${styleInstructions[style]}. Each narration MUST be under 20 words. Some scenes may not need narration — set text to empty string. Output JSON only.`,
+      },
+      {
+        role: 'user',
+        content: `Movie: "${brief.title}"\n\nScenes:\n${scenes.map((s) => `Scene ${s.sceneNumber}: ${s.description}`).join('\n')}\n\nReturn JSON: { "narrations": [{ "sceneNumber": 1, "text": "..." }, ...] }`,
+      },
+    ],
+    response_format: { type: 'json_object' },
+  });
 
-Rules:
-- Language: ${language === 'he' ? 'Hebrew' : 'English'}
-- Style: ${styleInstructions[style]}
-- Each narration MUST be under 20 words (must fit in 8 seconds when spoken)
-- Be evocative and cinematic — every word counts
-- Some scenes may not need narration — set text to empty string "" for those
-- Narration should complement the visuals, not describe them literally
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error('No response for narration texts');
 
-Scenes:
-${scenes.map((s) => `Scene ${s.sceneNumber}: ${s.description}`).join('\n')}
-
-Return JSON:
-{
-  "narrations": [
-    { "sceneNumber": 1, "text": "narration text here" },
-    ...
-  ]
-}`;
-
-  const result = await model.generateContent(prompt);
-  const content = result.response.text();
-  const cleanText = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  const parsed = JSON.parse(cleanText) as {
+  const parsed = JSON.parse(content) as {
     narrations: { sceneNumber: number; text: string }[];
   };
 

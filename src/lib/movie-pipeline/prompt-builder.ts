@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 import type {
   MovieBrief,
   NarrativePlan,
@@ -8,26 +8,29 @@ import type {
 } from './types';
 import { formatContinuityForPrompt } from './continuity';
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'anthropic/claude-sonnet-4';
 
-let _gemini: GoogleGenerativeAI | null = null;
-function getGemini(): GoogleGenerativeAI {
-  if (!_gemini) {
-    const key = process.env.GOOGLE_AI_API_KEY;
-    if (!key) throw new Error('GOOGLE_AI_API_KEY is not configured');
-    _gemini = new GoogleGenerativeAI(key);
+let _openrouter: OpenAI | null = null;
+function getOpenRouter(): OpenAI {
+  if (!_openrouter) {
+    _openrouter = new OpenAI({
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      defaultHeaders: {
+        'HTTP-Referer': process.env.NEXTAUTH_URL || 'http://localhost:3000',
+        'X-Title': 'Movie Pipeline',
+      },
+    });
   }
-  return _gemini;
+  return _openrouter;
 }
 
 // ===== Helpers =====
 
 function extractJSON(text: string): string {
-  // Try to find JSON block in markdown code fence
   const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenced) return fenced[1].trim();
 
-  // Try to find raw JSON object
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (jsonMatch) return jsonMatch[0];
 
@@ -36,9 +39,6 @@ function extractJSON(text: string): string {
 
 // ===== Narrative Planning =====
 
-/**
- * Claude plans the entire movie: acts, scenes, characters, style guide.
- */
 export async function planFullMovie(
   brief: MovieBrief
 ): Promise<NarrativePlan> {
@@ -46,22 +46,20 @@ export async function planFullMovie(
     '../prompts/narrative-planning'
   );
 
-  const model = getGemini().getGenerativeModel({
+  const response = await getOpenRouter().chat.completions.create({
     model: MODEL,
-    generationConfig: { responseMimeType: 'application/json' },
+    messages: [
+      { role: 'system', content: MOVIE_NARRATIVE_PROMPT },
+      { role: 'user', content: JSON.stringify(brief, null, 2) },
+    ],
+    response_format: { type: 'json_object' },
   });
 
-  const result = await model.generateContent([
-    MOVIE_NARRATIVE_PROMPT,
-    JSON.stringify(brief, null, 2),
-  ]);
-
-  const content = result.response.text();
-  if (!content) throw new Error('No response from Gemini for narrative planning');
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error('No response for narrative planning');
 
   const plan = JSON.parse(extractJSON(content)) as NarrativePlan;
 
-  // Ensure styleGuide has all required fields with defaults
   plan.styleGuide = {
     colorPalette: plan.styleGuide?.colorPalette || ['cinematic natural'],
     visualStyle: plan.styleGuide?.visualStyle || 'cinematic',
@@ -76,10 +74,6 @@ export async function planFullMovie(
 
 // ===== Feature-Length Planning (act-by-act) =====
 
-/**
- * For long movies: creates a high-level outline with acts, characters, and style guide.
- * Each act is then planned in detail separately via planActScenes().
- */
 export interface MovieOutline {
   title: string;
   totalDuration: number;
@@ -119,22 +113,20 @@ export async function planMovieOutline(
     '../prompts/narrative-planning'
   );
 
-  const model = getGemini().getGenerativeModel({
+  const response = await getOpenRouter().chat.completions.create({
     model: MODEL,
-    generationConfig: { responseMimeType: 'application/json' },
+    messages: [
+      { role: 'system', content: MOVIE_OUTLINE_PROMPT },
+      { role: 'user', content: JSON.stringify(brief, null, 2) },
+    ],
+    response_format: { type: 'json_object' },
   });
 
-  const result = await model.generateContent([
-    MOVIE_OUTLINE_PROMPT,
-    JSON.stringify(brief, null, 2),
-  ]);
-
-  const content = result.response.text();
-  if (!content) throw new Error('No response from Gemini for movie outline');
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error('No response for movie outline');
 
   const outline = JSON.parse(extractJSON(content)) as MovieOutline;
 
-  // Ensure defaults
   outline.styleGuide = {
     colorPalette: outline.styleGuide?.colorPalette || ['cinematic natural'],
     visualStyle: outline.styleGuide?.visualStyle || 'cinematic',
@@ -151,10 +143,6 @@ export async function planMovieOutline(
   return outline;
 }
 
-/**
- * Plans detailed scenes for a single act, given the movie outline.
- * This keeps each Claude call focused and within context limits.
- */
 export async function planActScenes(
   brief: MovieBrief,
   outline: MovieOutline,
@@ -185,17 +173,16 @@ Set actNumber to ${act.actNumber} for all scenes.
 
 Original brief: ${JSON.stringify(brief, null, 2)}`;
 
-  const model = getGemini().getGenerativeModel({
+  const response = await getOpenRouter().chat.completions.create({
     model: MODEL,
-    generationConfig: { responseMimeType: 'application/json' },
+    messages: [
+      { role: 'system', content: MOVIE_NARRATIVE_PROMPT },
+      { role: 'user', content: actBrief },
+    ],
+    response_format: { type: 'json_object' },
   });
 
-  const result = await model.generateContent([
-    MOVIE_NARRATIVE_PROMPT,
-    actBrief,
-  ]);
-
-  const content = result.response.text();
+  const content = response.choices[0]?.message?.content;
   if (!content) throw new Error(`No response for act ${act.actNumber}`);
 
   const parsed = JSON.parse(extractJSON(content)) as NarrativePlan;
@@ -205,7 +192,7 @@ Original brief: ${JSON.stringify(brief, null, 2)}`;
 // ===== Scene Prompt Generation =====
 
 const SCENE_PROMPT_SYSTEM = `You are a cinematic prompt engineer specializing in AI video generation.
-Your job is to create detailed, precise prompts for video generation models (Runway ML / Google Veo).
+Your job is to create detailed, precise prompts for video generation models (Google Veo).
 
 Given:
 1. A continuity document (style guide, character descriptions, previous scene context)
@@ -222,10 +209,6 @@ Rules:
 - Keep the prompt under 500 words
 - Output ONLY the prompt text, no JSON or markup`;
 
-/**
- * Generates a detailed video prompt for a single scene,
- * incorporating continuity information and style guide.
- */
 export async function generateScenePrompt(
   scene: PlannedScene,
   continuityDoc: ContinuityDocument,
@@ -251,14 +234,15 @@ Scene plan:
     userMessage += `\n\n[QA FEEDBACK - Fix these issues from previous attempt]:\n${qaFeedback.join('\n')}`;
   }
 
-  const model = getGemini().getGenerativeModel({ model: MODEL });
+  const response = await getOpenRouter().chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: SCENE_PROMPT_SYSTEM },
+      { role: 'user', content: userMessage },
+    ],
+  });
 
-  const result = await model.generateContent([
-    SCENE_PROMPT_SYSTEM,
-    userMessage,
-  ]);
-
-  const content = result.response.text();
+  const content = response.choices[0]?.message?.content;
   if (!content) throw new Error(`No prompt generated for scene ${scene.sceneNumber}`);
 
   return content.trim();
@@ -266,24 +250,27 @@ Scene plan:
 
 // ===== Prompt Refinement =====
 
-/**
- * Refines a scene prompt based on quality analysis feedback.
- * Used when a generated clip doesn't meet quality standards.
- */
 export async function refinePrompt(
   originalPrompt: string,
   issues: string[],
   continuityDoc: ContinuityDocument,
   sceneNumber: number
 ): Promise<string> {
-  const model = getGemini().getGenerativeModel({ model: MODEL });
+  const response = await getOpenRouter().chat.completions.create({
+    model: MODEL,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a prompt refinement specialist. Fix the video generation prompt to address quality issues while maintaining visual continuity. Output ONLY the refined prompt text.',
+      },
+      {
+        role: 'user',
+        content: `Original prompt:\n${originalPrompt}\n\nIssues found:\n${issues.join('\n')}\n\nStyle anchors (must keep):\n${continuityDoc.styleAnchors.join('\n')}\n\nRefine the prompt to fix these issues while keeping the same scene intent and style.`,
+      },
+    ],
+  });
 
-  const result = await model.generateContent([
-    `You are a prompt refinement specialist. Fix the video generation prompt to address quality issues while maintaining visual continuity. Output ONLY the refined prompt text.`,
-    `Original prompt:\n${originalPrompt}\n\nIssues found:\n${issues.join('\n')}\n\nStyle anchors (must keep):\n${continuityDoc.styleAnchors.join('\n')}\n\nRefine the prompt to fix these issues while keeping the same scene intent and style.`,
-  ]);
-
-  const content = result.response.text();
+  const content = response.choices[0]?.message?.content;
   if (!content) throw new Error(`Failed to refine prompt for scene ${sceneNumber}`);
 
   return content.trim();

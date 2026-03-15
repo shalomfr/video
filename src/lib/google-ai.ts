@@ -55,43 +55,42 @@ export interface ConcatenationResult {
   error?: string;
 }
 
-// ===== 1. Scene Planning with Gemini =====
+// ===== 1. Scene Planning with OpenRouter =====
 
 export async function planVideoScenes(
   briefData: Record<string, unknown>
 ): Promise<VideoScenePlan> {
-  const model = getGemini().getGenerativeModel({ model: "gemini-2.5-flash" });
+  const OpenAI = (await import("openai")).default;
+  const openrouter = new OpenAI({
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: process.env.OPENROUTER_API_KEY!,
+    defaultHeaders: {
+      "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
+      "X-Title": "Video AI Creator",
+    },
+  });
 
   const estimatedDuration = (briefData.videoLength as number) || 60;
   const sceneCount = Math.ceil(estimatedDuration / 8);
 
-  const prompt = `
-אתה תסריטאי מומחה לסרטונים פרסומיים.
-צור תסריט ל-${estimatedDuration} שניות (${sceneCount} סצנות של 8 שניות).
+  const response = await openrouter.chat.completions.create({
+    model: "anthropic/claude-sonnet-4",
+    messages: [
+      {
+        role: "system",
+        content: `אתה תסריטאי מומחה לסרטונים פרסומיים. צור תסריט ל-${estimatedDuration} שניות (${sceneCount} סצנות של 8 שניות). החזר JSON בלבד.`,
+      },
+      {
+        role: "user",
+        content: `פרטי העסק:\n${JSON.stringify(briefData, null, 2)}\n\nהחזר JSON:\n{"scenes": [{"sceneNumber": 1, "description": "תיאור בעברית", "prompt": "Detailed English prompt for Veo", "duration": 8, "cameraAngle": "wide shot / close-up / etc", "transition": "fade / cut / zoom"}], "overallStyle": "סגנון כללי", "colorPalette": ["#hex1", "#hex2"]}`,
+      },
+    ],
+    response_format: { type: "json_object" },
+  });
 
-פרטי העסק:
-${JSON.stringify(briefData, null, 2)}
-
-החזר JSON:
-{
-  "scenes": [
-    {
-      "sceneNumber": 1,
-      "description": "תיאור בעברית",
-      "prompt": "Detailed English prompt for Veo",
-      "duration": 8,
-      "cameraAngle": "wide shot / close-up / etc",
-      "transition": "fade / cut / zoom"
-    }
-  ],
-  "overallStyle": "סגנון כללי",
-  "colorPalette": ["#hex1", "#hex2"]
-}`;
-
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  return JSON.parse(cleanText);
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error("No response for scene planning");
+  return JSON.parse(content);
 }
 
 // ===== 2. Video Generation with Veo 3.1 =====
