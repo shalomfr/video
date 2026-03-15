@@ -120,12 +120,14 @@ export async function generateVideoFromText(
   const RunwayML = (await import("@runwayml/sdk")).default;
   const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  console.log(`  [Runway] Generating video...`);
+  // Runway limits promptText to 1000 characters
+  const truncatedPrompt = prompt.length > 1000 ? prompt.slice(0, 997) + '...' : prompt;
+  console.log(`  [Runway] Generating video... (prompt: ${truncatedPrompt.length} chars)`);
 
   const ratio = options.aspectRatio === "9:16" ? "720:1280" : "1280:720";
   const task = await client.textToVideo.create({
     model: "gen4.5",
-    promptText: prompt,
+    promptText: truncatedPrompt,
     ratio,
     duration: 5,
   });
@@ -184,7 +186,9 @@ export async function generateVideoFromImage(
   const RunwayML = (await import("@runwayml/sdk")).default;
   const client = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET! });
 
-  console.log(`  [Runway] Generating video from image...`);
+  // Runway limits promptText to 1000 characters
+  const truncatedPrompt = prompt.length > 1000 ? prompt.slice(0, 997) + '...' : prompt;
+  console.log(`  [Runway] Generating video from image... (prompt: ${truncatedPrompt.length} chars)`);
 
   const imageBuffer = fs.readFileSync(imagePath);
   const imageBase64 = imageBuffer.toString("base64");
@@ -195,7 +199,7 @@ export async function generateVideoFromImage(
   const task = await client.imageToVideo.create({
     model: "gen4_turbo",
     promptImage: dataUri,
-    promptText: prompt,
+    promptText: truncatedPrompt,
     ratio,
     duration: 5,
   });

@@ -219,7 +219,8 @@ Rules:
 - Include character descriptions exactly as specified
 - Reference the previous scene for visual flow
 - Be specific about camera movement, lighting, and composition
-- Keep the prompt under 500 words
+- CRITICAL: Keep the prompt under 900 characters (NOT words — characters). Runway has a 1000 character limit.
+- Be concise but descriptive. Prioritize visual details over narrative context.
 - Output ONLY the prompt text, no JSON or markup`;
 
 export async function generateScenePrompt(
